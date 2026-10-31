@@ -1,88 +1,71 @@
 import React, { useEffect } from 'react';
-import { CheckCircle2, ShieldCheck, Banknote, ArrowRight, Sparkles } from 'lucide-react';
+import { ShieldCheck, Check } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 export default function PayoutCard({ claim, payout }) {
   useEffect(() => {
-    // Trigger confetti burst on payout arrival
-    try {
-      confetti({
-        particleCount: 80,
-        spread: 70,
-        origin: { y: 0.6 }
-      });
-    } catch (e) {
-      // ignore
+    if (payout?.payout_id) {
+      try {
+        // Subtle, refined celebration
+        confetti({
+          particleCount: 28,
+          spread: 45,
+          startVelocity: 25,
+          ticks: 120,
+          origin: { y: 0.65 },
+          colors: ['#0A0A0A', '#059669', '#6B7280']
+        });
+      } catch {
+        // ignore
+      }
     }
   }, [payout?.payout_id]);
 
   if (!claim && !payout) return null;
 
-  const isTemp = claim?.type === 'TEMP_BREACH';
-  const amount = payout?.amount_inr ? `₹${payout.amount_inr.toLocaleString('en-IN')}` : '₹50,000';
-  const payoutId = payout?.payout_id || 'pay_live_mock';
+  const rawAmount = payout?.amount_inr || 50000;
+  const formattedAmount = `₹${rawAmount.toLocaleString('en-IN')}`;
+
+  // Plain human language reason
+  let humanReason = claim?.reason || 'Verified breach of delivery temperature threshold.';
+  if (claim?.type === 'TEMP_BREACH') {
+    humanReason = 'Temperature stayed above 8°C for more than 15 seconds.';
+  } else if (claim?.type === 'DROP') {
+    humanReason = 'High-impact drop occurred during transport.';
+  }
+
+  const beneficiary = payout?.beneficiary || 'PharmaSupply Logistics Ltd.';
+  const dateStr = payout?.timestamp 
+    ? new Date(payout.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    : new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-emerald-500/40 bg-gradient-to-br from-emerald-950/60 via-slate-900/90 to-slate-950 p-6 shadow-2xl backdrop-blur-xl animate-in fade-in slide-in-from-bottom duration-500">
-      {/* Background radial glow */}
-      <div className="absolute -top-12 -right-12 w-48 h-48 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />
-
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-        <div className="flex items-center gap-2.5">
-          <div className="p-2.5 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-            <ShieldCheck className="w-6 h-6" />
+    <div className="flex flex-col justify-between h-full">
+      <div>
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <div className="flex items-center gap-1.5 text-safe text-[13px] font-medium">
+            <ShieldCheck className="w-4 h-4" strokeWidth={1.75} />
+            <span>Automatic settlement</span>
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs uppercase tracking-wider font-bold text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-500/40">
-                Parametric Insurance
-              </span>
-              <span className="flex items-center gap-1 text-xs text-emerald-300 font-semibold">
-                <Sparkles className="w-3.5 h-3.5" /> Auto-Approved
-              </span>
-            </div>
-            <h3 className="text-lg font-bold text-white mt-0.5">
-              Instant Claim Settlement
-            </h3>
-          </div>
-        </div>
-
-        <div className="text-right">
-          <div className="text-2xl font-extrabold text-emerald-400 tracking-tight">
-            {amount}
-          </div>
-          <div className="text-xs text-slate-400">Instant Mock UPI/NEFT</div>
-        </div>
-      </div>
-
-      {/* Reason Banner */}
-      <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 text-sm text-slate-300 mb-4 flex items-start gap-2">
-        <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />
-        <div>
-          <span className="font-semibold text-white">Trigger: </span>
-          <span>{claim?.reason || 'Verified breach of custody parameter.'}</span>
-        </div>
-      </div>
-
-      {/* Forensic Verification Metadata */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-3 border-t border-slate-800 text-xs">
-        <div>
-          <span className="text-slate-500 block">Payout Reference</span>
-          <span className="mono font-semibold text-emerald-300 truncate block">{payoutId}</span>
-        </div>
-        <div>
-          <span className="text-slate-500 block">Settlement Status</span>
-          <span className="font-semibold text-emerald-400 flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            TRANSFERRED
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[12px] font-medium bg-safe-tint text-safe border border-safe/20">
+            <Check className="w-3 h-3" strokeWidth={2} />
+            Paid
           </span>
         </div>
-        <div className="col-span-2 sm:col-span-1">
-          <span className="text-slate-500 block">Beneficiary</span>
-          <span className="text-slate-200 truncate block">{payout?.beneficiary || 'PharmaSupply Logistics Ltd.'}</span>
+
+        <div className="text-[52px] sm:text-[56px] font-bold tracking-tight text-ink leading-none tabular my-2">
+          {formattedAmount}
         </div>
+
+        <p className="text-[14px] text-ink font-normal leading-relaxed mt-3">
+          {humanReason}
+        </p>
+      </div>
+
+      <div className="pt-4 mt-6 border-t border-hairline flex items-center justify-between text-[12px] text-muted">
+        <span>Beneficiary: {beneficiary}</span>
+        <span className="tabular">{dateStr}</span>
       </div>
     </div>
   );
 }
-

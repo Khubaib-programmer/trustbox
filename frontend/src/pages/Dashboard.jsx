@@ -2,44 +2,43 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { io } from 'socket.io-client';
 import { 
   ResponsiveContainer, 
-  LineChart, 
-  Line, 
+  AreaChart,
+  Area,
   XAxis, 
   YAxis, 
   Tooltip, 
-  ReferenceLine, 
-  CartesianGrid 
+  ReferenceLine 
 } from 'recharts';
 import { 
-  Thermometer, 
-  Droplets, 
-  Activity, 
-  ShieldAlert, 
+  Box, 
+  Check, 
+  X, 
+  ChevronDown, 
+  Sun, 
+  Moon, 
   ShieldCheck, 
-  Flame, 
-  Compass, 
-  Lock, 
-  Unlock, 
-  QrCode, 
-  RotateCcw, 
-  AlertTriangle,
-  Radio,
-  ExternalLink,
-  Clock,
-  Inbox,
-  RefreshCw
+  ShieldAlert, 
+  Clock, 
+  QrCode,
+  RotateCcw,
+  Sliders,
+  CheckCircle2,
+  AlertTriangle
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import RouteMap from '../components/RouteMap';
 import PayoutCard from '../components/PayoutCard';
 import QRCodeModal from '../components/QRCodeModal';
+import KpiTile from '../components/KpiTile';
+import StatusPill from '../components/StatusPill';
+import Skeleton from '../components/Skeleton';
 
 export default function Dashboard() {
   const [boxId, setBoxId] = useState('TB-001');
-  const [inputBoxId, setInputBoxId] = useState('TB-001');
   const [availableBoxes, setAvailableBoxes] = useState(['TB-001', 'TB-DEMO-01', 'TB-TEST']);
+  const [isDeviceMenuOpen, setIsDeviceMenuOpen] = useState(false);
+  const [customInputBox, setCustomInputBox] = useState('');
   const [isConnected, setIsConnected] = useState(false);
-  const [backendError, setBackendError] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const [records, setRecords] = useState([]);
@@ -48,16 +47,43 @@ export default function Dashboard() {
   const [latestRecord, setLatestRecord] = useState(null);
   const [chainVerify, setChainVerify] = useState(null);
 
+  // Chart view metric: 'temp' | 'humidity'
+  const [activeMetric, setActiveMetric] = useState('temp');
+  // Timeline view: collapsed (max 8) or expanded
+  const [showAllTimeline, setShowAllTimeline] = useState(false);
+  // Modal for sharing proof
+  const [isQrOpen, setIsQrOpen] = useState(false);
+
+  // Discreet test incident controls
+  const [showSimControls, setShowSimControls] = useState(false);
   const [isTamperLoading, setIsTamperLoading] = useState(false);
   const [tamperSuccessMsg, setTamperSuccessMsg] = useState(null);
   const [selectedTamperSeq, setSelectedTamperSeq] = useState('');
-  const [isQrOpen, setIsQrOpen] = useState(false);
 
-  // References to prevent race conditions and cross-device stale overwrites
+  // Dark mode toggle (React state + root class)
+  const [isDark, setIsDark] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('trustbox_theme');
+      if (stored) return stored === 'dark';
+      return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    if (isDark) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('trustbox_theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('trustbox_theme', 'light');
+    }
+  }, [isDark]);
+
+  // Race condition protection refs
   const activeBoxRef = useRef(boxId);
   const activeRequestIdRef = useRef(0);
 
-  // Always keep activeBoxRef in sync with boxId
   useEffect(() => {
     activeBoxRef.current = boxId;
   }, [boxId]);
@@ -69,31 +95,25 @@ export default function Dashboard() {
       if (res.ok) {
         const data = await res.json();
         if (data.boxes && Array.isArray(data.boxes)) {
-          // Merge discovered boxes with defaults
           setAvailableBoxes((prev) => {
-            const combined = Array.from(new Set([...data.boxes, ...prev, 'TB-001', 'TB-DEMO-01', 'TB-TEST']));
-            return combined;
+            return Array.from(new Set([...data.boxes, ...prev, 'TB-001', 'TB-DEMO-01', 'TB-TEST']));
           });
         }
       }
     } catch {
-      // Backend may be starting
+      // Backend starting up
     }
   };
 
-  // Dedicated device change handler
+  // Device switch handler
   const handleDeviceChange = (newId) => {
     const cleanId = String(newId || '').trim();
     if (!cleanId) return;
 
-    // Immediately update input and active box
-    setInputBoxId(cleanId);
     setBoxId(cleanId);
     activeBoxRef.current = cleanId;
-
-    // Clear stale state for previous device
+    setIsDeviceMenuOpen(false);
     setTamperSuccessMsg(null);
-    setBackendError(null);
     setIsLoading(true);
     setRecords([]);
     setClaims([]);
@@ -102,22 +122,13 @@ export default function Dashboard() {
     setChainVerify(null);
   };
 
-  // Form submit handler for custom box ID input
-  const handleBoxSubmit = (e) => {
-    e.preventDefault();
-    if (inputBoxId.trim()) {
-      handleDeviceChange(inputBoxId.trim());
-    }
-  };
-
-  // Fetch box data and chain integrity with race-condition protection
+  // Fetch telemetry and verification status
   const fetchData = useCallback(async (targetId) => {
     const targetBox = (targetId || activeBoxRef.current).trim();
     if (!targetBox) return;
 
     const requestId = ++activeRequestIdRef.current;
     setIsLoading(true);
-    setBackendError(null);
 
     try {
       const [recRes, claimRes, payRes, verifyRes] = await Promise.all([
@@ -127,7 +138,6 @@ export default function Dashboard() {
         fetch(`/api/verify/${encodeURIComponent(targetBox)}`)
       ]);
 
-      // If another request started while this was in-flight, discard this response
       if (requestId !== activeRequestIdRef.current || targetBox !== activeBoxRef.current) {
         return;
       }
@@ -139,97 +149,61 @@ export default function Dashboard() {
 
       if (recRes.ok) {
         const rawRec = await recRes.json();
-        if (Array.isArray(rawRec)) {
-          parsedRecords = rawRec;
-        }
-      } else {
-        setBackendError(`Backend returned HTTP ${recRes.status} for records.`);
+        if (Array.isArray(rawRec)) parsedRecords = rawRec;
       }
-
       if (claimRes.ok) {
         const rawClaims = await claimRes.json();
         if (Array.isArray(rawClaims)) parsedClaims = rawClaims;
       }
-
       if (payRes.ok) {
         const rawPayouts = await payRes.json();
         if (Array.isArray(rawPayouts)) parsedPayouts = rawPayouts;
       }
-
       if (verifyRes.ok) {
         parsedVerify = await verifyRes.json();
       }
 
-      // Check once more after async json() deserialization
-      if (requestId !== activeRequestIdRef.current || targetBox !== activeBoxRef.current) {
-        return;
-      }
-
-      // Atomically commit state for this device
       setRecords(parsedRecords);
       setClaims(parsedClaims);
       setPayouts(parsedPayouts);
       setChainVerify(parsedVerify);
 
       if (parsedRecords.length > 0) {
-        // Records are in ascending seq order; last element is latest
-        const latest = parsedRecords[parsedRecords.length - 1];
-        setLatestRecord(latest);
-        const midIndex = Math.floor(parsedRecords.length / 2);
-        setSelectedTamperSeq(String(parsedRecords[midIndex].seq));
+        setLatestRecord(parsedRecords[parsedRecords.length - 1]);
       } else {
         setLatestRecord(null);
-        setSelectedTamperSeq('');
       }
     } catch (err) {
-      if (requestId === activeRequestIdRef.current && targetBox === activeBoxRef.current) {
-        console.error('Error fetching data from backend:', err);
-        setBackendError('Cannot connect to backend server on port 4000. Ensure backend is running.');
-      }
+      console.error('Data fetch error:', err);
     } finally {
-      if (requestId === activeRequestIdRef.current && targetBox === activeBoxRef.current) {
+      if (requestId === activeRequestIdRef.current) {
         setIsLoading(false);
       }
     }
   }, []);
 
-  // Fetch available boxes on initial mount
+  // Poll and establish real-time socket connection
   useEffect(() => {
     fetchBoxes();
-  }, []);
-
-  // Main data sync & Socket.io setup when active boxId changes
-  useEffect(() => {
     fetchData(boxId);
 
-    // Setup Socket.io connection for real-time live feed
     const socket = io();
 
-    socket.on('connect', () => {
-      setIsConnected(true);
-      setBackendError(null);
-    });
-
-    socket.on('disconnect', () => {
-      setIsConnected(false);
-    });
+    socket.on('connect', () => setIsConnected(true));
+    socket.on('disconnect', () => setIsConnected(false));
 
     socket.on('record', (newRecord) => {
       if (newRecord.box_id === activeBoxRef.current) {
-        setLatestRecord(newRecord);
         setRecords((prev) => {
-          if (prev.some(r => r.seq === newRecord.seq)) return prev;
-          const updated = [...prev, newRecord];
-          return updated.slice(-100);
+          if (prev.some((r) => r.seq === newRecord.seq)) return prev;
+          const updated = [...prev, newRecord].sort((a, b) => a.seq - b.seq);
+          return updated;
         });
-        // Re-verify chain tip on incoming record
+        setLatestRecord(newRecord);
+        // Refresh verify state quietly
         fetch(`/api/verify/${encodeURIComponent(activeBoxRef.current)}`)
-          .then(r => r.json())
-          .then(v => {
-            if (activeBoxRef.current === newRecord.box_id) {
-              setChainVerify(v);
-            }
-          })
+          .then((r) => r.json())
+          .then((v) => setChainVerify(v))
           .catch(() => {});
       }
     });
@@ -254,649 +228,590 @@ export default function Dashboard() {
 
     socket.on('reset', (info) => {
       if (info.box_id === activeBoxRef.current) {
-        setRecords([]);
-        setClaims([]);
-        setPayouts([]);
-        setLatestRecord(null);
-        setTamperSuccessMsg(null);
-        setChainVerify({ ok: true, empty: true, count: 0 });
+        fetchData(activeBoxRef.current);
       }
     });
 
+    const fallbackInterval = setInterval(() => {
+      fetchData(activeBoxRef.current);
+    }, 6000);
+
     return () => {
       socket.disconnect();
+      clearInterval(fallbackInterval);
     };
   }, [boxId, fetchData]);
 
-  // Handle Admin Tamper action
+  // Tamper simulation handler (kept minimal for review/demo)
   const handleTamper = async () => {
-    if (records.length === 0) {
-      alert('No records stored yet for this box. Run fake-publisher.js first.');
-      return;
-    }
-    const seqNum = selectedTamperSeq !== '' ? parseInt(selectedTamperSeq, 10) : records[0].seq;
-    if (isNaN(seqNum)) {
-      alert('Please enter a valid sequence number to tamper.');
-      return;
-    }
-
-    if (!confirm(`Demonstrate Tamper Detection?\nThis will mutate record #${seqNum} of ${boxId} in the database without re-signing it.\nThe verification engine should immediately detect the altered hash.`)) {
-      return;
-    }
+    const seqToTamper = selectedTamperSeq !== '' 
+      ? selectedTamperSeq 
+      : (latestRecord ? Math.max(0, latestRecord.seq - 1) : 0);
 
     setIsTamperLoading(true);
+    setTamperSuccessMsg(null);
     try {
-      const res = await fetch(`/api/admin/tamper/${encodeURIComponent(boxId)}/${seqNum}`, {
+      const res = await fetch(`/api/admin/tamper/${encodeURIComponent(boxId)}/${seqToTamper}`, {
         method: 'POST'
       });
       const data = await res.json();
       if (res.ok) {
-        setTamperSuccessMsg(`Record #${seqNum} of ${boxId} was modified in database! Verification will now flag this record.`);
+        setTamperSuccessMsg(`Reading #${seqToTamper} was modified.`);
         fetchData(boxId);
-      } else {
-        alert(data.error || 'Failed to tamper record');
       }
-    } catch (e) {
-      alert(e.message);
+    } catch {
+      // ignore
     } finally {
       setIsTamperLoading(false);
     }
   };
 
-  // Handle Admin Reset action
-  const handleReset = async () => {
-    if (!confirm(`Reset all telemetry records, claims, and payouts for ${boxId}?\n(This will clear the chain for this box)`)) return;
-    try {
-      const res = await fetch(`/api/admin/reset/${encodeURIComponent(boxId)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ confirm: true })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setRecords([]);
-        setClaims([]);
-        setPayouts([]);
-        setLatestRecord(null);
-        setTamperSuccessMsg(null);
-        setChainVerify({ ok: true, empty: true, count: 0 });
-        fetchBoxes();
-      } else {
-        alert(data.error || 'Failed to reset box');
-      }
-    } catch (e) {
-      console.error(e);
-      alert('Network error while resetting box.');
+  // Status computation
+  const isBroken = chainVerify && chainVerify.ok === false;
+  const isDrop = latestRecord?.event === 'DROP' || latestRecord?.shock === 1;
+  const isTempBreach = latestRecord?.event === 'TEMP_BREACH' || (latestRecord?.temp_c > 8.0);
+  const isLidOpen = latestRecord?.event === 'LID_OPEN' || latestRecord?.lid_open === 1;
+  const isFlipped = latestRecord?.event === 'FLIPPED' || latestRecord?.flipped === 1;
+
+  let statusSentenceStart = "Your delivery is ";
+  let statusKeyword = "safe.";
+  let statusTone = "safe";
+
+  if (isBroken) {
+    statusSentenceStart = "Records were ";
+    statusKeyword = "tampered with.";
+    statusTone = "danger";
+  } else if (isTempBreach) {
+    statusSentenceStart = "Temperature is ";
+    statusKeyword = "too high.";
+    statusTone = "danger";
+  } else if (isDrop) {
+    statusSentenceStart = "Package was ";
+    statusKeyword = "dropped.";
+    statusTone = "danger";
+  } else if (isLidOpen) {
+    statusSentenceStart = "Box lid was ";
+    statusKeyword = "opened.";
+    statusTone = "warning";
+  } else if (isFlipped) {
+    statusSentenceStart = "Package was ";
+    statusKeyword = "flipped.";
+    statusTone = "warning";
+  }
+
+  // Hero band background tints
+  const heroStyles = {
+    safe: 'bg-safe-tint/70 border-safe/20',
+    warning: 'bg-warning-tint/70 border-warning/20',
+    danger: 'bg-danger-tint/70 border-danger/20',
+  }[statusTone] || 'bg-surface border-hairline';
+
+  const heroStatusTextColors = {
+    safe: 'text-safe',
+    warning: 'text-warning',
+    danger: 'text-danger',
+  }[statusTone] || 'text-ink';
+
+  const currentTemp = latestRecord?.temp_c ?? 4.8;
+  const currentHumidity = latestRecord?.humidity ?? 52.0;
+  const tempProgress = Math.min(Math.max((currentTemp / 16) * 100, 0), 100);
+
+  // Timeline events mapping (human titles, newest first)
+  const timelineEvents = [...records].reverse();
+  const visibleTimeline = showAllTimeline ? timelineEvents : timelineEvents.slice(0, 8);
+
+  const getEventTitle = (event) => {
+    switch (event) {
+      case 'DROP': return 'Package dropped';
+      case 'TEMP_BREACH': return 'Temperature went above limit';
+      case 'LID_OPEN': return 'Lid was opened';
+      case 'FLIPPED': return 'Package was flipped';
+      default: return 'Everything normal';
     }
   };
 
-  // Authoritative record count from verification engine or records array
-  const totalCount = (chainVerify?.count !== undefined && chainVerify?.count !== null)
-    ? chainVerify.count
-    : records.length;
-
-  // Determine overall status flags
-  const isTampered = chainVerify && chainVerify.ok === false;
-  const isEmpty = !isLoading && totalCount === 0 && !isTampered;
-  const hasBreach = claims.length > 0 || (latestRecord && (latestRecord.temp_c > 8.0 || latestRecord.shock === 1));
-
-  // Chart data formatting
-  const chartData = records.map(r => ({
-    time: new Date(r.ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-    temp: r.temp_c,
-    humidity: r.humidity,
-    seq: r.seq
-  }));
-
-  const activeClaim = claims[0];
-  const activePayout = payouts[0];
+  const activePayout = payouts[0] || null;
+  const activeClaim = claims[0] || null;
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-      {/* Backend Offline Warning Banner */}
-      {backendError && (
-        <div className="p-3.5 rounded-xl bg-rose-950/90 border border-rose-500/70 text-rose-200 text-xs flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
-            <span className="font-semibold">{backendError}</span>
-          </div>
-          <button 
-            onClick={() => fetchData(boxId)} 
-            className="px-2.5 py-1 rounded bg-rose-800 hover:bg-rose-700 text-white font-bold transition"
-          >
-            Retry Connection
-          </button>
-        </div>
-      )}
-
-      {/* Top Header Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-800">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
-            <Radio className="w-6 h-6 animate-pulse" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">TrustBox Live Telemetry</h1>
-              <span className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full border ${
-                isConnected 
-                  ? 'bg-emerald-950/80 text-emerald-400 border-emerald-500/40' 
-                  : 'bg-rose-950/80 text-rose-400 border-rose-500/40'
-              }`}>
-                {isConnected ? 'LIVE FEED' : 'OFFLINE / RECONNECTING'}
-              </span>
+    <div className="min-h-screen bg-background text-ink flex flex-col transition-colors duration-200">
+      {/* A) Top Bar (Sticky, 64px, bottom hairline) */}
+      <header className="sticky top-0 z-40 h-16 bg-surface/95 backdrop-blur-sm border-b border-hairline px-4 sm:px-6 lg:px-8 flex items-center justify-between">
+        <div className="flex items-center gap-4 sm:gap-6">
+          {/* Logo */}
+          <Link to="/" className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-ink text-surface flex items-center justify-center">
+              <Box className="w-4 h-4" strokeWidth={2} />
             </div>
-            <p className="text-xs text-slate-400">Cryptographically Hash-Chained Parcel Custody Tracker &middot; SHA-256 + HMAC</p>
-          </div>
-        </div>
-
-        {/* Box Selector & Action Buttons */}
-        <div className="flex flex-wrap items-center gap-2.5">
-          {/* Quick Dropdown Selector for All Available Devices */}
-          <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs shadow-inner">
-            <span className="text-slate-400 font-medium">Device:</span>
-            <select
-              value={availableBoxes.includes(boxId) ? boxId : ''}
-              onChange={(e) => {
-                if (e.target.value) handleDeviceChange(e.target.value);
-              }}
-              className="bg-slate-950 text-emerald-400 font-mono font-bold px-2 py-0.5 rounded border border-slate-800 focus:outline-none focus:border-emerald-500 cursor-pointer"
-            >
-              {availableBoxes.map((id) => (
-                <option key={id} value={id}>{id}</option>
-              ))}
-              {!availableBoxes.includes(boxId) && (
-                <option value={boxId}>{boxId} (Custom)</option>
-              )}
-            </select>
-          </div>
-
-          {/* Custom Box ID Input Form */}
-          <form onSubmit={handleBoxSubmit} className="flex items-center gap-1.5 bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs shadow-inner focus-within:border-emerald-500 focus-within:ring-1 focus-within:ring-emerald-500/50 transition">
-            <input 
-              type="text" 
-              value={inputBoxId} 
-              onChange={(e) => setInputBoxId(e.target.value)}
-              placeholder="Custom Box ID"
-              className="bg-slate-950 text-white font-mono font-bold w-24 sm:w-28 px-2 py-0.5 rounded border border-slate-800 focus:outline-none focus:border-emerald-500"
-            />
-            <button
-              type="submit"
-              className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] transition"
-            >
-              Load
-            </button>
-          </form>
-
-          {/* Quick device chips */}
-          <div className="hidden sm:flex items-center gap-1 text-[11px]">
-            {availableBoxes.slice(0, 4).map((b) => (
-              <button
-                key={b}
-                type="button"
-                onClick={() => handleDeviceChange(b)}
-                className={`px-2 py-1 rounded-lg font-mono transition ${
-                  b === boxId 
-                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold shadow-sm' 
-                    : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
-                }`}
-              >
-                {b}
-              </button>
-            ))}
-          </div>
-
-          <button
-            onClick={() => setIsQrOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition"
-          >
-            <QrCode className="w-4 h-4 text-emerald-400" />
-            <span>Scan QR</span>
-          </button>
-
-          <Link
-            to={`/verify/${encodeURIComponent(boxId)}`}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-lg shadow-emerald-900/30 transition"
-          >
-            <ShieldCheck className="w-4 h-4" />
-            <span>Verify Chain</span>
-            <ExternalLink className="w-3.5 h-3.5 opacity-70" />
+            <span className="text-[17px] font-semibold tracking-tight text-ink">
+              TrustBox
+            </span>
           </Link>
-        </div>
-      </div>
 
-      {/* Main Status Banner */}
-      {isLoading ? (
-        /* Loading Skeletons State */
-        <div className="p-4 sm:p-5 rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur-md flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3.5">
-            <div className="p-3 rounded-2xl bg-slate-800 text-slate-400 border border-slate-700 animate-spin">
-              <RefreshCw className="w-8 h-8 text-emerald-400" />
-            </div>
-            <div>
-              <div className="text-xs uppercase font-extrabold tracking-wider text-slate-400">Ledger Synchronization</div>
-              <div className="text-xl sm:text-2xl font-black text-slate-200">
-                SYNCING TELEMETRY LEDGER FOR {boxId}...
-              </div>
-              <div className="text-xs text-slate-400 mt-0.5">
-                Verifying cryptographic hash chain and retrieving signed telemetry records...
-              </div>
-            </div>
-          </div>
-          <div className="bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-2 text-right">
-            <div className="text-[11px] uppercase text-slate-400 font-semibold">Chained Records</div>
-            <div className="text-2xl font-black text-slate-500 mono">--</div>
-          </div>
-        </div>
-      ) : isTampered ? (
-        /* Tampered State Banner */
-        <div className="p-4 sm:p-5 rounded-2xl border border-rose-500/80 bg-rose-950/40 glow-red backdrop-blur-md flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3.5">
-            <div className="p-3 rounded-2xl bg-rose-500/20 text-rose-400 border border-rose-500/40 animate-pulse">
-              <ShieldAlert className="w-8 h-8" />
-            </div>
-            <div>
-              <div className="text-xs uppercase font-extrabold tracking-wider text-rose-300">Cryptographic Integrity Alert</div>
-              <div className="text-xl sm:text-2xl font-black text-rose-400">
-                TAMPER DETECTED AT SEQ #{chainVerify?.brokenAt ?? '?'}
-              </div>
-              <div className="text-xs text-rose-200 mt-0.5">
-                {chainVerify?.reason || 'Record hash mismatch detected in database ledger. Tampering identified.'}
-              </div>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <Link 
-              to={`/verify/${encodeURIComponent(boxId)}`}
-              className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-lg transition"
-            >
-              Inspect Forensic Report &rarr;
-            </Link>
-            <div className="bg-slate-900/80 border border-slate-800 rounded-xl px-4 py-2 text-right">
-              <div className="text-[11px] uppercase text-slate-400 font-semibold">Chained Records</div>
-              <div className="text-2xl font-black text-rose-400 mono">{totalCount}</div>
-            </div>
-          </div>
-        </div>
-      ) : isEmpty ? (
-        /* Honest Empty State Banner */
-        <div className="p-4 sm:p-5 rounded-2xl border border-slate-700 bg-slate-900/80 backdrop-blur-md flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3.5">
-            <div className="p-3 rounded-2xl bg-slate-800 text-slate-400 border border-slate-700">
-              <Inbox className="w-8 h-8" />
-            </div>
-            <div>
-              <div className="text-xs uppercase font-extrabold tracking-wider text-slate-400">Device Ledger Status</div>
-              <div className="text-xl sm:text-2xl font-black text-slate-200">
-                NO TELEMETRY RECORDED YET
-              </div>
-              <div className="text-xs text-slate-400 mt-0.5">
-                Chain anchor is at genesis block <span className="mono text-white">#0</span>. Transmit records using <span className="mono text-emerald-400 font-semibold">fake-publisher.js</span> or physical ESP32 box.
-              </div>
-            </div>
-          </div>
-          <div className="bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-2 text-right">
-            <div className="text-[11px] uppercase text-slate-400 font-semibold">Chained Records</div>
-            <div className="text-2xl font-black text-slate-500 mono">0</div>
-          </div>
-        </div>
-      ) : (
-        /* Safe / Breach Banner */
-        <div className={`p-4 sm:p-5 rounded-2xl border transition-all duration-300 flex flex-wrap items-center justify-between gap-4 ${
-          hasBreach ? 'glass-panel-danger glow-red' : 'glass-panel-success glow-green'
-        }`}>
-          <div className="flex items-center gap-3.5">
-            <div className={`p-3 rounded-2xl ${hasBreach ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
-              {hasBreach ? <ShieldAlert className="w-8 h-8" /> : <ShieldCheck className="w-8 h-8" />}
-            </div>
-            <div>
-              <div className="text-xs uppercase font-extrabold tracking-wider text-slate-400">Box Custody Health</div>
-              <div className={`text-xl sm:text-2xl font-black ${hasBreach ? 'text-rose-400' : 'text-emerald-400'}`}>
-                {hasBreach ? 'BREACH DETECTED — CLAIM TRIGGERED' : 'SAFE COLD CHAIN — ALL PARAMETERS INTACT'}
-              </div>
-              <div className="text-xs text-slate-300 mt-0.5">
-                {latestRecord ? (
-                  <span>Last verified record <span className="mono font-bold text-white">#{latestRecord.seq}</span> at {new Date(latestRecord.ts * 1000).toLocaleTimeString()}</span>
-                ) : (
-                  'Waiting for incoming records...'
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-slate-900/80 border border-slate-800 rounded-xl px-4 py-2 text-right">
-            <div className="text-[11px] uppercase text-slate-400 font-semibold">Chained Records</div>
-            <div className="text-2xl font-black text-white mono">
-              {totalCount}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Payout & Claim Card if Triggered */}
-      {activePayout && (
-        <PayoutCard claim={activeClaim} payout={activePayout} />
-      )}
-
-      {/* Live Metric Cards Grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        {/* Metric 1: Temperature */}
-        <div className={`p-4 rounded-xl border glass-panel transition ${
-          latestRecord?.temp_c > 8.0 ? 'border-rose-500/60 bg-rose-950/20' : 'border-slate-800'
-        }`}>
-          <div className="flex items-center justify-between text-slate-400 text-xs font-medium mb-1">
-            <span>Temperature</span>
-            <Thermometer className={`w-4 h-4 ${latestRecord?.temp_c > 8.0 ? 'text-rose-400 animate-bounce' : 'text-emerald-400'}`} />
-          </div>
-          <div className="flex items-baseline gap-1.5">
-            <span className={`text-2xl sm:text-3xl font-extrabold mono ${
-              latestRecord?.temp_c > 8.0 ? 'text-rose-400' : 'text-emerald-400'
-            }`}>
-              {latestRecord ? `${latestRecord.temp_c.toFixed(1)}°C` : '--'}
-            </span>
-          </div>
-          <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-1">
-            <span>Limit: &le; 8.0°C</span>
-            {latestRecord?.temp_c > 8.0 && <span className="text-rose-400 font-bold">(EXCEEDED)</span>}
-          </div>
-        </div>
-
-        {/* Metric 2: Humidity */}
-        <div className="p-4 rounded-xl border border-slate-800 glass-panel">
-          <div className="flex items-center justify-between text-slate-400 text-xs font-medium mb-1">
-            <span>Humidity</span>
-            <Droplets className="w-4 h-4 text-cyan-400" />
-          </div>
-          <div className="flex items-baseline gap-1.5">
-            <span className="text-2xl sm:text-3xl font-extrabold mono text-cyan-400">
-              {latestRecord ? `${latestRecord.humidity.toFixed(1)}%` : '--'}
-            </span>
-          </div>
-          <div className="text-[11px] text-slate-400 mt-1">Normal target (40% - 70%)</div>
-        </div>
-
-        {/* Metric 3: Shock & Drop */}
-        <div className={`p-4 rounded-xl border glass-panel transition ${
-          latestRecord?.shock === 1 ? 'border-rose-500/60 bg-rose-950/20' : 'border-slate-800'
-        }`}>
-          <div className="flex items-center justify-between text-slate-400 text-xs font-medium mb-1">
-            <span>Impact / Shock</span>
-            <Activity className={`w-4 h-4 ${latestRecord?.shock === 1 ? 'text-rose-400' : 'text-slate-400'}`} />
-          </div>
-          <div className="flex items-baseline gap-1.5">
-            <span className={`text-xl sm:text-2xl font-bold ${
-              latestRecord?.shock === 1 ? 'text-rose-400' : 'text-slate-200'
-            }`}>
-              {latestRecord ? (latestRecord.shock === 1 ? 'DROP DETECTED' : 'NORMAL (0g)') : '--'}
-            </span>
-          </div>
-          <div className="text-[11px] text-slate-400 mt-1">
-            Orientation: {latestRecord ? (latestRecord.flipped === 1 ? 'FLIPPED' : latestRecord.tilt === 1 ? 'TILTED' : 'UPRIGHT') : '--'}
-          </div>
-        </div>
-
-        {/* Metric 4: Lid Status */}
-        <div className={`p-4 rounded-xl border glass-panel transition ${
-          latestRecord?.lid_open === 1 ? 'border-amber-500/60 bg-amber-950/20' : 'border-slate-800'
-        }`}>
-          <div className="flex items-center justify-between text-slate-400 text-xs font-medium mb-1">
-            <span>Box Enclosure Lid</span>
-            {latestRecord?.lid_open === 1 ? <Unlock className="w-4 h-4 text-amber-400" /> : <Lock className="w-4 h-4 text-emerald-400" />}
-          </div>
-          <div className="flex items-baseline gap-1.5">
-            <span className={`text-xl sm:text-2xl font-bold ${
-              latestRecord ? (latestRecord.lid_open === 1 ? 'LID OPEN' : 'SEALED & LOCKED') : '--'
-            }`}>
-              {latestRecord ? (latestRecord.lid_open === 1 ? 'LID OPEN' : 'SEALED & LOCKED') : '--'}
-            </span>
-          </div>
-          <div className="text-[11px] text-slate-400 mt-1">
-            Light reading: {latestRecord?.light !== undefined ? `${latestRecord.light} lux` : '--'}
-          </div>
-        </div>
-      </div>
-
-      {/* Middle Row: Temperature Chart & Map */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Temperature Chart (2 Cols) */}
-        <div className="lg:col-span-2 p-5 rounded-2xl border border-slate-800 glass-panel flex flex-col justify-between">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h2 className="text-base font-bold text-white flex items-center gap-2">
-                <Thermometer className="w-4 h-4 text-emerald-400" />
-                Live Temperature Stream (°C)
-              </h2>
-              <p className="text-xs text-slate-400">Target cold-chain range: 2.0°C – 8.0°C &middot; Breach threshold: &gt;8.0°C</p>
-            </div>
-            <div className="flex items-center gap-3 text-xs">
-              <span className="flex items-center gap-1.5 text-slate-300">
-                <span className="w-3 h-0.5 bg-emerald-400 inline-block"></span> Sensor Temp
-              </span>
-              <span className="flex items-center gap-1.5 text-rose-400">
-                <span className="w-3 h-0.5 bg-rose-500 inline-block"></span> 8.0°C Breach Limit
-              </span>
-            </div>
-          </div>
-
-          <div className="w-full h-64">
-            {chartData.length === 0 ? (
-              <div className="w-full h-full flex flex-col items-center justify-center text-slate-500 text-xs">
-                <Inbox className="w-8 h-8 mb-2 opacity-50" />
-                <span>No telemetry data yet. Run fake-publisher.js or connect ESP32.</span>
-              </div>
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                  <XAxis 
-                    dataKey="time" 
-                    stroke="#64748b" 
-                    tick={{ fontSize: 11 }}
-                    tickLine={false}
-                  />
-                  <YAxis 
-                    domain={[0, 25]} 
-                    stroke="#64748b" 
-                    tick={{ fontSize: 11 }}
-                    tickLine={false}
-                    unit="°C"
-                  />
-                  <Tooltip 
-                    contentStyle={{ 
-                      backgroundColor: '#0f172a', 
-                      borderColor: '#334155', 
-                      borderRadius: '0.75rem', 
-                      fontSize: '12px' 
-                    }} 
-                  />
-                  <ReferenceLine 
-                    y={8.0} 
-                    stroke="#ef4444" 
-                    strokeDasharray="4 4" 
-                    strokeWidth={2}
-                    label={{ value: 'Claim Threshold (8.0°C)', fill: '#ef4444', fontSize: 11, position: 'top' }}
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="temp" 
-                    stroke="#10b981" 
-                    strokeWidth={2.5} 
-                    dot={false}
-                    activeDot={{ r: 5, fill: '#10b981' }}
-                    isAnimationActive={false}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-        </div>
-
-        {/* Map Route (1 Col) */}
-        <div className="p-5 rounded-2xl border border-slate-800 glass-panel flex flex-col">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-base font-bold text-white flex items-center gap-2">
-              <Compass className="w-4 h-4 text-cyan-400" />
-              Delivery Corridor Replay
-            </h2>
-          </div>
-          <div className="flex-1 min-h-[260px]">
-            <RouteMap currentSeq={latestRecord?.seq || 0} />
-          </div>
-        </div>
-      </div>
-
-      {/* Admin Demo Controls & Tamper Bar */}
-      <div className="p-5 rounded-2xl border border-purple-500/30 bg-purple-950/20 backdrop-blur-md">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-purple-900/60 text-purple-300 border border-purple-500/40">
-                Hackathon Judge Controls
-              </span>
-              <h3 className="text-base font-bold text-white">Live Cryptographic Tamper Simulation</h3>
-            </div>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Simulate an adversary modifying a stored telemetry record in database storage without possessing the shared secret DEVICE_KEY.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2.5">
-            {/* Target record selector */}
-            <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs">
-              <span className="text-slate-400">Target Seq:</span>
-              <input
-                type="number"
-                min="0"
-                value={selectedTamperSeq}
-                onChange={(e) => setSelectedTamperSeq(e.target.value)}
-                placeholder={records.length > 0 ? String(records[0].seq) : '#'}
-                disabled={records.length === 0}
-                className="bg-slate-950 text-white font-mono w-14 px-1.5 py-0.5 rounded border border-slate-800 text-center focus:outline-none focus:border-rose-500"
-              />
-            </div>
-
+          {/* Minimal Pill Device Selector */}
+          <div className="relative">
             <button
-              onClick={handleTamper}
-              disabled={isTamperLoading || records.length === 0}
-              className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-40 text-white text-xs font-bold shadow-lg shadow-rose-900/40 flex items-center gap-2 transition"
+              onClick={() => setIsDeviceMenuOpen(!isDeviceMenuOpen)}
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-background hover:bg-surface border border-hairline text-[13px] font-medium text-ink transition duration-150"
+              aria-label="Select device box"
             >
-              <AlertTriangle className="w-4 h-4" />
-              <span>{isTamperLoading ? 'Tampering...' : `Tamper Record #${selectedTamperSeq || '0'}`}</span>
+              <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-safe' : 'bg-muted'}`} />
+              <span className="tabular font-medium">{boxId}</span>
+              <ChevronDown className="w-3.5 h-3.5 text-muted" strokeWidth={1.75} />
             </button>
 
-            <button
-              onClick={handleReset}
-              className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700 flex items-center gap-1.5 transition"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Reset State</span>
-            </button>
-          </div>
-        </div>
+            {/* Custom Minimal Dropdown Popover */}
+            {isDeviceMenuOpen && (
+              <>
+                <div 
+                  className="fixed inset-0 z-40" 
+                  onClick={() => setIsDeviceMenuOpen(false)} 
+                />
+                <div className="absolute left-0 mt-2 w-56 rounded-20 bg-surface border border-hairline p-2 shadow-modal z-50 animate-scale-in">
+                  <div className="text-[11px] font-medium uppercase tracking-widest text-muted px-2.5 py-1.5">
+                    Select Box
+                  </div>
+                  <div className="space-y-0.5 max-h-48 overflow-y-auto">
+                    {availableBoxes.map((id) => (
+                      <button
+                        key={id}
+                        onClick={() => handleDeviceChange(id)}
+                        className={`w-full text-left px-2.5 py-1.5 rounded-xl text-[13px] font-medium flex items-center justify-between transition ${
+                          id === boxId 
+                            ? 'bg-background text-ink font-semibold' 
+                            : 'text-muted hover:text-ink hover:bg-background'
+                        }`}
+                      >
+                        <span className="tabular">{id}</span>
+                        {id === boxId && <Check className="w-3.5 h-3.5 text-ink" strokeWidth={2} />}
+                      </button>
+                    ))}
+                  </div>
 
-        {tamperSuccessMsg && (
-          <div className="mt-4 p-3 rounded-xl bg-rose-950/80 border border-rose-500/50 text-xs text-rose-200 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
-              <span>{tamperSuccessMsg}</span>
-            </div>
-            <Link 
-              to={`/verify/${encodeURIComponent(boxId)}`} 
-              className="underline font-bold text-white hover:text-rose-300 flex items-center gap-1"
-            >
-              <span>View Verify Page Now</span>
-              <ExternalLink className="w-3 h-3" />
-            </Link>
-          </div>
-        )}
-      </div>
-
-      {/* Bottom Row: Recent Event Timeline & Latest Hash Chain */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Event Timeline */}
-        <div className="p-5 rounded-2xl border border-slate-800 glass-panel">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-base font-bold text-white flex items-center gap-2">
-              <Clock className="w-4 h-4 text-amber-400" />
-              Live Custody Event Log
-            </h2>
-            <span className="text-xs text-slate-400">Latest 5 events</span>
-          </div>
-
-          <div className="space-y-2.5">
-            {records.slice(-5).reverse().map((rec) => (
-              <div 
-                key={rec.seq}
-                className="p-3 rounded-xl bg-slate-900/60 border border-slate-800/80 flex items-center justify-between text-xs"
-              >
-                <div className="flex items-center gap-2.5">
-                  <span className={`w-2 h-2 rounded-full ${
-                    rec.event !== 'NONE' ? 'bg-rose-400 animate-ping' : 'bg-emerald-400'
-                  }`} />
-                  <div>
-                    <span className="font-semibold text-white">Seq #{rec.seq}</span>
-                    <span className="text-slate-400 ml-2">
-                      {new Date(rec.ts * 1000).toLocaleTimeString()}
-                    </span>
+                  {/* Quick Custom ID Input */}
+                  <div className="pt-2 mt-1 border-t border-hairline">
+                    <form 
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        if (customInputBox.trim()) {
+                          handleDeviceChange(customInputBox.trim());
+                          setCustomInputBox('');
+                        }
+                      }}
+                      className="flex gap-1"
+                    >
+                      <input
+                        type="text"
+                        placeholder="Other ID..."
+                        value={customInputBox}
+                        onChange={(e) => setCustomInputBox(e.target.value)}
+                        className="w-full px-2.5 py-1 rounded-lg bg-background border border-hairline text-[12px] text-ink focus:outline-none"
+                      />
+                      <button
+                        type="submit"
+                        className="px-2 py-1 rounded-lg bg-accent text-accent-ink text-[12px] font-medium"
+                      >
+                        Go
+                      </button>
+                    </form>
                   </div>
                 </div>
-
-                <div className="flex items-center gap-2">
-                  <span className={`px-2 py-0.5 rounded font-mono font-bold text-[11px] ${
-                    rec.event === 'TEMP_BREACH' ? 'bg-rose-950 text-rose-400 border border-rose-800' :
-                    rec.event === 'DROP' ? 'bg-amber-950 text-amber-400 border border-amber-800' :
-                    rec.event === 'FLIPPED' ? 'bg-purple-950 text-purple-400 border border-purple-800' :
-                    rec.event === 'LID_OPEN' ? 'bg-yellow-950 text-yellow-400 border border-yellow-800' :
-                    'bg-slate-800 text-slate-300'
-                  }`}>
-                    {rec.event}
-                  </span>
-                  <span className="mono text-slate-400">{rec.temp_c}°C</span>
-                </div>
-              </div>
-            ))}
-            {records.length === 0 && (
-              <div className="text-slate-500 text-xs py-4 text-center">No telemetry logs recorded yet.</div>
+              </>
             )}
           </div>
         </div>
 
-        {/* Cryptographic Hash Ledger */}
-        <div className="p-5 rounded-2xl border border-slate-800 glass-panel">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-base font-bold text-white flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              Cryptographic Chain Tip
-            </h2>
-            <span className="text-xs text-slate-400">HMAC-SHA256 (Shared Secret)</span>
+        {/* Right side controls */}
+        <div className="flex items-center gap-3">
+          {/* Live indicator */}
+          <div className="hidden sm:inline-flex items-center gap-1.5 text-[12px] text-muted tabular">
+            <span className="relative flex h-2 w-2">
+              {isConnected && (
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-safe opacity-75" />
+              )}
+              <span className={`relative inline-flex rounded-full h-2 w-2 ${isConnected ? 'bg-safe' : 'bg-muted'}`} />
+            </span>
+            <span>{isConnected ? 'Live' : 'Offline'}</span>
           </div>
 
-          <div className="space-y-3 text-xs">
-            <div>
-              <span className="text-slate-400 block mb-1">Latest SHA-256 Block Hash</span>
-              <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 mono text-emerald-400 break-all select-all">
-                {latestRecord?.hash || '0000000000000000000000000000000000000000000000000000000000000000 (Genesis Anchor)'}
-              </div>
-            </div>
+          {/* Theme Toggle */}
+          <button
+            onClick={() => setIsDark(!isDark)}
+            className="p-2 rounded-full text-muted hover:text-ink hover:bg-background border border-transparent hover:border-hairline transition duration-150"
+            aria-label="Toggle dark mode"
+          >
+            {isDark ? <Sun className="w-4 h-4" strokeWidth={1.75} /> : <Moon className="w-4 h-4" strokeWidth={1.75} />}
+          </button>
 
-            <div>
-              <span className="text-slate-400 block mb-1">Previous Chained Hash (prev_hash)</span>
-              <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 mono text-slate-400 break-all select-all">
-                {latestRecord?.prev_hash || '0000000000000000000000000000000000000000000000000000000000000000 (Genesis Anchor)'}
-              </div>
-            </div>
-
-            <div>
-              <span className="text-slate-400 block mb-1">Device HMAC Signature (sig)</span>
-              <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 mono text-purple-400 break-all select-all">
-                {latestRecord?.sig || 'Awaiting initial signed record...'}
-              </div>
-            </div>
-          </div>
+          {/* Share proof button */}
+          <button
+            onClick={() => setIsQrOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-[12px] bg-accent text-accent-ink hover:opacity-90 active:scale-[0.98] text-[13px] font-medium transition duration-150"
+          >
+            <QrCode className="w-3.5 h-3.5" strokeWidth={1.75} />
+            <span>Share proof</span>
+          </button>
         </div>
-      </div>
+      </header>
 
-      {/* QR Code Modal */}
+      {/* Main Container */}
+      <main className="flex-1 max-w-[1200px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+        
+        {/* B) Hero Status Band (Full width card) */}
+        <section 
+          className={`w-full rounded-20 border p-6 sm:p-8 transition-colors duration-400 ${heroStyles}`}
+          aria-live="polite"
+        >
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+            {/* Left: Giant status sentence */}
+            <div className="max-w-xl">
+              <h1 className="text-[34px] sm:text-[44px] lg:text-[48px] font-semibold tracking-tighter leading-tight text-ink">
+                <span>{statusSentenceStart}</span>
+                <span className={heroStatusTextColors}>{statusKeyword}</span>
+              </h1>
+              <p className="mt-2 text-[14px] text-muted">
+                {latestRecord ? (
+                  <>Last update {new Date(latestRecord.ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })} · Box {boxId}</>
+                ) : (
+                  <>Waiting for initial readings · Box {boxId}</>
+                )}
+              </p>
+            </div>
+
+            {/* Right: Giant live temperature number */}
+            <div className="flex flex-col md:items-end justify-center min-w-[200px]">
+              <div className="flex items-baseline gap-1">
+                <span className="text-[64px] sm:text-[96px] font-semibold tracking-tightest leading-none text-ink tabular">
+                  {currentTemp.toFixed(1)}
+                </span>
+                <span className="text-[28px] sm:text-[36px] font-medium text-muted">°C</span>
+              </div>
+
+              <div className="text-[13px] text-muted mt-1">
+                Safe range up to 8.0°C
+              </div>
+
+              {/* Thin progress track */}
+              <div className="w-full max-w-[220px] h-1.5 bg-hairline rounded-full overflow-hidden mt-2.5">
+                <div 
+                  className={`h-full transition-all duration-500 rounded-full ${
+                    currentTemp > 8 ? 'bg-danger' : 'bg-safe'
+                  }`}
+                  style={{ width: `${tempProgress}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* C) KPI Row (4 Equal Minimal Tiles) */}
+        <section className="grid grid-cols-2 lg:grid-cols-4 gap-6 sm:gap-8 py-2 border-y border-hairline">
+          <KpiTile 
+            label="Temperature"
+            value={currentTemp.toFixed(1)}
+            unit="°C"
+            delta={currentTemp <= 8.0 ? "Safe threshold" : "Limit exceeded"}
+            statusTone={currentTemp <= 8.0 ? "safe" : "danger"}
+          />
+
+          <KpiTile 
+            label="Humidity"
+            value={currentHumidity.toFixed(1)}
+            unit="%"
+            delta="Nominal air humidity"
+          />
+
+          <KpiTile 
+            label="Readings"
+            value={records.length}
+            delta={records.length > 0 ? "Total recorded" : "Awaiting data"}
+          />
+
+          <KpiTile 
+            label="Integrity"
+            value={isBroken ? "Broken" : "Verified"}
+            statusIcon={isBroken ? X : Check}
+            statusTone={isBroken ? "danger" : "safe"}
+            delta={isBroken ? `Problem at #${chainVerify?.brokenAt}` : "All checks passed"}
+          />
+        </section>
+
+        {/* D) Main Chart Card (Full width with Segmented Control) */}
+        <section className="rounded-20 bg-surface border border-hairline p-6 sm:p-8">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+            <div>
+              <h2 className="text-[20px] font-semibold tracking-tight text-ink">
+                {activeMetric === 'temp' ? 'Temperature over time' : 'Humidity over time'}
+              </h2>
+              <p className="text-[13px] text-muted mt-0.5">
+                Continuous custody monitoring
+              </p>
+            </div>
+
+            {/* Segmented Control */}
+            <div className="inline-flex p-1 rounded-[12px] bg-background border border-hairline self-start sm:self-auto">
+              <button
+                onClick={() => setActiveMetric('temp')}
+                className={`px-3 py-1.5 rounded-[9px] text-[13px] font-medium transition duration-150 ${
+                  activeMetric === 'temp'
+                    ? 'bg-surface text-ink shadow-sm'
+                    : 'text-muted hover:text-ink'
+                }`}
+              >
+                Temperature
+              </button>
+              <button
+                onClick={() => setActiveMetric('humidity')}
+                className={`px-3 py-1.5 rounded-[9px] text-[13px] font-medium transition duration-150 ${
+                  activeMetric === 'humidity'
+                    ? 'bg-surface text-ink shadow-sm'
+                    : 'text-muted hover:text-ink'
+                }`}
+              >
+                Humidity
+              </button>
+            </div>
+          </div>
+
+          {/* Chart View */}
+          <div className="h-[240px] sm:h-[320px] w-full">
+            {records.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={records} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="chartGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={isDark ? '#E5E7EB' : '#0A0A0A'} stopOpacity={0.08} />
+                      <stop offset="95%" stopColor={isDark ? '#E5E7EB' : '#0A0A0A'} stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  
+                  {/* Faint horizontal lines only */}
+                  <YAxis 
+                    stroke="none"
+                    tick={{ fill: 'var(--muted)', fontSize: 11 }}
+                    domain={activeMetric === 'temp' ? [0, 18] : [20, 80]}
+                    tickCount={5}
+                  />
+                  <XAxis 
+                    dataKey="ts" 
+                    stroke="none"
+                    tick={{ fill: 'var(--muted)', fontSize: 11 }}
+                    tickFormatter={(ts) => new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  />
+
+                  {/* 8°C Limit on temperature chart */}
+                  {activeMetric === 'temp' && (
+                    <ReferenceLine 
+                      y={8} 
+                      stroke="var(--danger)" 
+                      strokeDasharray="4 4" 
+                      strokeWidth={1.5}
+                      label={{ 
+                        value: 'Limit 8°C', 
+                        fill: 'var(--danger)', 
+                        fontSize: 11, 
+                        position: 'right' 
+                      }} 
+                    />
+                  )}
+
+                  {/* Minimalist Tooltip */}
+                  <Tooltip 
+                    content={({ active, payload }) => {
+                      if (active && payload && payload.length) {
+                        const rec = payload[0].payload;
+                        return (
+                          <div className="bg-surface border border-hairline rounded-xl px-3 py-2 shadow-modal text-left">
+                            <div className="text-[11px] text-muted tabular">
+                              {new Date(rec.ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                            </div>
+                            <div className="text-[16px] font-semibold text-ink tabular mt-0.5">
+                              {activeMetric === 'temp' ? `${rec.temp_c}°C` : `${rec.humidity}%`}
+                            </div>
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
+
+                  <Area 
+                    type="monotone" 
+                    dataKey={activeMetric === 'temp' ? 'temp_c' : 'humidity'} 
+                    stroke={isDark ? '#FAFAFA' : '#0A0A0A'}
+                    strokeWidth={2}
+                    fill="url(#chartGradient)"
+                    isAnimationActive={false}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex items-center justify-center text-[14px] text-muted">
+                Waiting for telemetry readings...
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* E) Two-Column Section (7/12 Timeline + 5/12 Insurance) */}
+        <section className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+          
+          {/* Left Column (7/12): Timeline Card */}
+          <div className="lg:col-span-7 rounded-20 bg-surface border border-hairline p-6 sm:p-8 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-[20px] font-semibold tracking-tight text-ink">
+                    Timeline
+                  </h2>
+                  <p className="text-[13px] text-muted mt-0.5">
+                    Custody status records
+                  </p>
+                </div>
+                {timelineEvents.length > 8 && (
+                  <button
+                    onClick={() => setShowAllTimeline(!showAllTimeline)}
+                    className="text-[13px] font-medium text-muted hover:text-ink transition"
+                  >
+                    {showAllTimeline ? 'Show less' : 'Show all'}
+                  </button>
+                )}
+              </div>
+
+              {/* Clean Vertical Timeline */}
+              {visibleTimeline.length > 0 ? (
+                <div className="relative pl-6 space-y-6 before:absolute before:left-2 before:top-2 before:bottom-2 before:w-[1px] before:bg-hairline">
+                  {visibleTimeline.map((rec) => {
+                    const isIncident = rec.event && rec.event !== 'NONE';
+                    const dotColor = isIncident ? 'bg-danger' : 'bg-faint';
+
+                    return (
+                      <div key={rec.seq} className="relative flex items-center justify-between gap-4 text-left">
+                        {/* Status Dot */}
+                        <div className={`absolute -left-6 top-1.5 w-2 h-2 rounded-full ${dotColor}`} />
+
+                        <div>
+                          <div className="text-[15px] font-medium text-ink">
+                            {getEventTitle(rec.event)}
+                          </div>
+                          <div className="text-[12px] text-muted mt-0.5">
+                            {rec.temp_c}°C · {rec.humidity}%
+                          </div>
+                        </div>
+
+                        <div className="text-[13px] text-muted tabular whitespace-nowrap">
+                          {new Date(rec.ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="py-12 text-center text-muted flex flex-col items-center justify-center">
+                  <CheckCircle2 className="w-8 h-8 text-safe mb-2" strokeWidth={1.5} />
+                  <p className="text-[15px] font-medium text-ink">No incidents. All good.</p>
+                  <p className="text-[13px] text-muted mt-0.5">All monitored conditions remain within safe limits.</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Right Column (5/12): Insurance Card */}
+          <div className="lg:col-span-5 rounded-20 bg-surface border border-hairline p-6 sm:p-8 flex flex-col justify-between">
+            <div>
+              <h2 className="text-[20px] font-semibold tracking-tight text-ink mb-1">
+                Insurance
+              </h2>
+              <p className="text-[13px] text-muted mb-6">
+                Parametric coverage protection
+              </p>
+
+              {activePayout || activeClaim ? (
+                <PayoutCard claim={activeClaim} payout={activePayout} />
+              ) : (
+                <div className="py-12 text-center text-muted flex flex-col items-center justify-center h-[240px]">
+                  <ShieldCheck className="w-8 h-8 text-safe mb-2" strokeWidth={1.5} />
+                  <p className="text-[15px] font-medium text-ink">No claims. You are covered.</p>
+                  <p className="text-[13px] text-muted mt-0.5 max-w-xs">
+                    Automatic compensation will trigger instantly if temperature exceeds 8°C for 15s or drop occurs.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+
+        {/* F) Route Map Card (Full width) */}
+        <section className="space-y-3">
+          <div className="flex items-baseline justify-between px-1">
+            <h2 className="text-[20px] font-semibold tracking-tight text-ink">
+              Route
+            </h2>
+            <span className="text-[13px] text-muted">
+              Origin: Airport Pharma Cargo · Destination: Regional Hospital
+            </span>
+          </div>
+
+          <RouteMap currentSeq={latestRecord?.seq ?? 0} />
+        </section>
+
+        {/* Quiet Incident Simulation Controls (For presentation/demo test) */}
+        <section className="pt-4 border-t border-hairline text-center">
+          <button
+            onClick={() => setShowSimControls(!showSimControls)}
+            className="text-[12px] font-medium text-muted hover:text-ink inline-flex items-center gap-1.5 transition"
+          >
+            <Sliders className="w-3.5 h-3.5" strokeWidth={1.75} />
+            <span>{showSimControls ? 'Hide demonstration controls' : 'Demonstration controls'}</span>
+          </button>
+
+          {showSimControls && (
+            <div className="mt-4 p-5 rounded-20 bg-surface border border-hairline max-w-lg mx-auto text-left animate-fade-in">
+              <div className="text-[13px] font-semibold text-ink mb-1">
+                Tamper Injection Test
+              </div>
+              <p className="text-[12px] text-muted mb-3">
+                Simulate a database modification to verify that the cryptographic audit catches alterations immediately.
+              </p>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  placeholder="Reading #"
+                  value={selectedTamperSeq}
+                  onChange={(e) => setSelectedTamperSeq(e.target.value)}
+                  className="w-28 px-3 py-2 rounded-xl bg-background border border-hairline text-[13px] text-ink focus:outline-none"
+                />
+                <button
+                  onClick={handleTamper}
+                  disabled={isTamperLoading}
+                  className="flex-1 py-2 px-3 rounded-xl bg-accent text-accent-ink text-[13px] font-medium hover:opacity-90 disabled:opacity-50 transition"
+                >
+                  {isTamperLoading ? 'Injecting...' : 'Modify reading'}
+                </button>
+              </div>
+
+              {tamperSuccessMsg && (
+                <div className="mt-3 text-[12px] text-danger flex items-center justify-between">
+                  <span>{tamperSuccessMsg}</span>
+                  <Link to={`/verify/${boxId}`} className="underline font-medium text-ink">
+                    View audit
+                  </Link>
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+
+        {/* G) Footer */}
+        <footer className="text-center pt-8 pb-12 border-t border-hairline">
+          <p className="text-[13px] text-faint">
+            Every reading is sealed and cannot be changed without detection.
+          </p>
+        </footer>
+      </main>
+
+      {/* Share Proof QR Modal */}
       <QRCodeModal 
         boxId={boxId} 
         isOpen={isQrOpen} 

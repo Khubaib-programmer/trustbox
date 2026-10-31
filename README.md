@@ -136,21 +136,24 @@ trustbox-main/
 │   └── .env.example                ← Template — copy this to create .env
 │
 ├── frontend/
-│   ├── index.html                  ← App shell
+│   ├── index.html                  ← App shell (Inter font, clean favicon)
 │   ├── vite.config.js              ← Vite dev server + API proxy to :4000
-│   ├── tailwind.config.js          ← Tailwind CSS config
+│   ├── tailwind.config.js          ← Tailwind CSS config (dark mode, design tokens)
 │   ├── package.json                ← Frontend dependencies
 │   └── src/
 │       ├── main.jsx                ← React entry point
 │       ├── App.jsx                 ← Router (Dashboard + VerifyPage routes)
-│       ├── index.css               ← Global styles + Tailwind directives
+│       ├── index.css               ← Design tokens, CSS variables, dark mode & map filters
 │       ├── pages/
-│       │   ├── Dashboard.jsx       ← Main live monitoring dashboard
-│       │   └── VerifyPage.jsx      ← Public chain verification + QR scanner
+│       │   ├── Dashboard.jsx       ← Minimalist monitoring dashboard (Linear/Apple Health style)
+│       │   └── VerifyPage.jsx      ← Mobile-first public verification page + audit result
 │       └── components/
-│           ├── PayoutCard.jsx      ← Insurance payout display card
-│           ├── QRCodeModal.jsx     ← QR code generator modal
-│           └── RouteMap.jsx        ← Leaflet GPS route map
+│           ├── KpiTile.jsx         ← Minimal borderless KPI tile with tabular numerals
+│           ├── StatusPill.jsx      ← Pill status badge with soft status tint
+│           ├── Skeleton.jsx        ← Subtle grey shimmer loading placeholder
+│           ├── PayoutCard.jsx      ← Bold insurance settlement card with subtle confetti
+│           ├── QRCodeModal.jsx     ← Share proof modal with copyable link
+│           └── RouteMap.jsx        ← Watermark-free Leaflet GPS route map (zero API key)
 │
 ├── firmware/
 │   └── trustbox_esp32.ino          ← Arduino sketch for ESP32 hardware
@@ -920,29 +923,29 @@ Tests: record ingestion, duplicate rejection, chain continuity enforcement, veri
 
 ## 20. Dashboard Pages Guide
 
+The dashboard has been designed with a clean, calm, minimalist visual layer (Linear, Stripe, Apple Health design aesthetic).
+
 ### Main Dashboard — `http://localhost:3000/`
 
 | Section | Description |
 |---|---|
-| **Device Selector** | Dropdown to switch between box IDs |
-| **Chain Status Badge** | Green = verified / Red = tampered with seq number |
-| **Record Count** | Total telemetry records stored |
-| **Temperature Chart** | Live recharts line graph with breach threshold line |
-| **Humidity Chart** | Live humidity percentage over time |
-| **Custody Event Log** | All anomaly events (DROP, TEMP_BREACH, LID_OPEN, FLIPPED) |
-| **Claims Panel** | All approved insurance claims |
-| **Payout Cards** | Insurance payouts with amount and beneficiary |
-| **Route Map** | Leaflet map showing GPS coordinates from telemetry |
-| **QR Code Button** | Generates a scannable verification URL for the current box |
+| **Top Bar** | Sticky 64px header: TrustBox wordmark, pill device selector with live dot, Light/Dark theme toggle (Sun/Moon), and "Share proof" button |
+| **Hero Status Band** | Instant readability: 48px status sentence (*"Your delivery is safe."*, *"Temperature is too high."*, etc.) with color on status word only; giant 96px temperature number, safe threshold track, and soft status tint |
+| **KPI Row** | 4 equal borderless tiles with tabular numbers: Temperature (°C), Humidity (%), Readings count, and Integrity status (Verified/Broken) |
+| **Unified Chart Card** | Recharts area chart with segmented toggle (`Temperature` \| `Humidity`), faint 5% horizontal grids, dashed 8°C danger threshold line, and minimal hover tooltip |
+| **Timeline Card** | Clean vertical custody log with human-readable event titles (*"Package dropped"*, *"Temperature went above limit"*, *"Lid was opened"*, *"Everything normal"*) and timestamps |
+| **Insurance Card** | Parametric coverage status. When breached, renders bold 56px settlement block with "Paid" status pill, reason, beneficiary, and subtle confetti |
+| **Route Map** | Watermark-free, zero-API-key Leaflet route map using OpenStreetMap with custom light/dark desaturation filters and minimal zoom controls |
+| **Proof Modal** | Clean QR code modal with direct link copy and Escape key dismissal |
+| **Demonstration Controls** | Discreet, collapsible drawer at bottom for live tamper injection testing without UI clutter |
 
 ### Verification Page — `http://localhost:3000/verify/:boxId`
 
-Accessible by scanning the QR code or visiting the URL directly. Shows:
-- Full chain integrity result
-- Record count
-- Tamper detection status (broken at which seq)
-- Latest hash fingerprint
-- Timestamp of latest record
+A mobile-first, shareable public audit page:
+- **Status Verdict**: 96px circle with check or cross, 48px headline (*"Verified"* or *"Tampered"*), and plain-language explanation.
+- **Audit Details**: Clean 3-row list with hairline dividers: Readings checked, Last reading timestamp, and shortened digital fingerprint with copy button.
+- **Scan Another Box**: Minimal overlay with corner brackets to quickly enter or switch to any other box ID.
+- **Loading State**: Quiet grey shimmer skeletons instead of spinning loaders.
 
 ---
 
@@ -1039,12 +1042,16 @@ The box already has records. The simulator tries to continue the chain automatic
 node fake-publisher.js --boxId TB-FRESH-$(date +%s)
 ```
 
-### Chain verification shows `ok: false`
-The tamper demo was run (`/api/admin/tamper`). Reset the box to clear tampered records:
+### Chain verification shows `ok: false` or `Genesis block missing at seq #...`
+The zero-trust audit requires an unbroken chain starting at sequence `#0` (genesis block). If early records were cleared or tampering was injected:
 ```bash
+# Reset the box to start fresh at sequence #0:
 curl -X POST http://localhost:4000/api/admin/reset/TB-001
 ```
-Then run the simulator again to rebuild a clean chain.
+Then run the simulator to stream a clean, unbroken chain starting at `#0`.
+
+### Map tiles watermark or API key
+The map component (`RouteMap.jsx`) uses standard OpenStreetMap tiles with custom client-side CSS dark and light desaturation filters. It is **100% free, permanent, requires zero API keys, and has no watermarks**.
 
 ### IoT HTTP ingest returns 400
 Check that:

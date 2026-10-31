@@ -1,59 +1,84 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { X, ExternalLink, Smartphone } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Check, Copy } from 'lucide-react';
 
 export default function QRCodeModal({ boxId, isOpen, onClose }) {
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    if (isOpen) {
+      window.addEventListener('keydown', handleKeyDown);
+    }
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const verifyUrl = `${window.location.origin}/verify/${boxId}`;
 
+  const handleCopy = () => {
+    navigator.clipboard.writeText(verifyUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   return (
-    <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="relative w-full max-w-sm rounded-2xl bg-slate-900 border border-slate-700 p-6 shadow-2xl text-center">
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
-        >
-          <X className="w-5 h-5" />
-        </button>
-
-        <div className="mx-auto w-12 h-12 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 mb-3">
-          <Smartphone className="w-6 h-6" />
-        </div>
-
-        <h3 className="text-xl font-bold text-white mb-1">Physical Parcel Tag</h3>
-        <p className="text-xs text-slate-400 mb-5">
-          Scan this QR code with any phone camera to verify the tamper-evident cryptographic hash chain.
+    <div 
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 animate-fade-in"
+      onClick={onClose}
+    >
+      <div 
+        className="relative w-full max-w-sm rounded-[24px] bg-surface border border-hairline p-7 shadow-modal text-center animate-scale-in"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-[20px] font-semibold tracking-tight text-ink">
+          Share proof of delivery
+        </h3>
+        <p className="mt-1 text-[14px] text-muted leading-normal">
+          Anyone can scan this to check the journey of this package.
         </p>
 
         {/* QR Code Container */}
-        <div className="p-4 bg-white rounded-xl inline-block shadow-lg border-2 border-emerald-500/30">
-          <QRCodeSVG
+        <div className="my-6 p-6 rounded-2xl bg-white border border-hairline flex items-center justify-center shadow-card">
+          <QRCodeSVG 
             value={verifyUrl}
             size={180}
-            level="H"
-            includeMargin={true}
+            level="M"
+            fgColor="#0A0A0A"
+            bgColor="#FFFFFF"
           />
         </div>
 
-        <div className="mt-4 p-2.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-400 mono break-all">
-          {verifyUrl}
+        <div className="text-[12px] font-medium uppercase tracking-widest text-muted tabular mb-6">
+          Box {boxId}
         </div>
 
-        <div className="mt-4 flex gap-2">
-          <Link
-            to={`/verify/${boxId}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition"
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleCopy}
+            className="flex-1 py-2.5 px-4 rounded-[12px] bg-accent text-accent-ink hover:opacity-90 active:scale-[0.98] text-[14px] font-medium flex items-center justify-center gap-1.5 transition duration-150"
           >
-            <span>Open Verify Page</span>
-            <ExternalLink className="w-3.5 h-3.5" />
-          </Link>
+            {copied ? (
+              <>
+                <Check className="w-4 h-4 text-safe" strokeWidth={2} />
+                <span>Link copied</span>
+              </>
+            ) : (
+              <>
+                <Copy className="w-4 h-4" strokeWidth={1.75} />
+                <span>Copy link</span>
+              </>
+            )}
+          </button>
+          
           <button
             onClick={onClose}
-            className="py-2 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition"
+            className="py-2.5 px-4 rounded-[12px] bg-surface hover:bg-background border border-hairline text-ink text-[14px] font-medium transition duration-150"
           >
             Close
           </button>
@@ -62,4 +87,3 @@ export default function QRCodeModal({ boxId, isOpen, onClose }) {
     </div>
   );
 }
-

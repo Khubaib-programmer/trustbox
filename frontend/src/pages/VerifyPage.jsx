@@ -1,27 +1,26 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { 
-  ShieldCheck, 
-  ShieldAlert, 
-  RefreshCw, 
-  Copy, 
   Check, 
+  X, 
+  Copy, 
   ArrowLeft, 
-  AlertTriangle,
-  Lock,
-  Layers,
-  Clock,
-  Sparkles,
-  Inbox
+  QrCode, 
+  RefreshCw,
+  Box
 } from 'lucide-react';
 import { io } from 'socket.io-client';
+import Skeleton from '../components/Skeleton';
 
 export default function VerifyPage() {
   const { boxId } = useParams();
+  const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
-  const [lastChecked, setLastChecked] = useState(new Date());
+  const [lastAuditTime, setLastAuditTime] = useState(new Date());
+  const [isScanning, setIsScanning] = useState(false);
+  const [scanInput, setScanInput] = useState('');
 
   const checkChain = async () => {
     setLoading(true);
@@ -29,14 +28,13 @@ export default function VerifyPage() {
       const res = await fetch(`/api/verify/${encodeURIComponent(boxId)}`);
       const json = await res.json();
       setData(json);
-      setLastChecked(new Date());
+      setLastAuditTime(new Date());
     } catch (e) {
-      console.error('Verification request failed:', e);
       setData({ 
         ok: false, 
         count: 0, 
         brokenAt: 0, 
-        reason: 'Failed to communicate with verification backend on port 4000.' 
+        reason: 'Unable to communicate with verification service.' 
       });
     } finally {
       setLoading(false);
@@ -46,7 +44,7 @@ export default function VerifyPage() {
   useEffect(() => {
     checkChain();
 
-    // Re-verify automatically on live records or tamper events
+    // Auto-refresh when record or tamper event arrives
     const socket = io();
     socket.on('tamper', (info) => {
       if (info.box_id === boxId) checkChain();
@@ -63,204 +61,252 @@ export default function VerifyPage() {
     };
   }, [boxId]);
 
-  const copyHash = () => {
-    const hashToCopy = data?.latestHash || data?.genesisHash || '0000000000000000000000000000000000000000000000000000000000000000';
-    navigator.clipboard.writeText(hashToCopy);
+  const copyFingerprint = () => {
+    const val = data?.latestHash || '0000000000000000000000000000000000000000000000000000000000000000';
+    navigator.clipboard.writeText(val);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleScanSubmit = (e) => {
+    e.preventDefault();
+    if (scanInput.trim()) {
+      const clean = scanInput.trim();
+      setScanInput('');
+      setIsScanning(false);
+      navigate(`/verify/${encodeURIComponent(clean)}`);
+    }
+  };
+
   const isEmpty = data && (data.count === 0 || data.empty === true);
-  const isIntact = data && data.ok === true && !isEmpty;
+  const isVerified = data && data.ok === true && !isEmpty;
   const isTampered = data && data.ok === false;
 
+  const rawHash = data?.latestHash || '0000000000000000000000000000000000000000000000000000000000000000';
+  const shortFingerprint = `${rawHash.slice(0, 8)}...${rawHash.slice(-4)}`;
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between p-4 sm:p-6 lg:p-8">
-      {/* Top Header Bar */}
-      <div className="max-w-md w-full mx-auto flex items-center justify-between pb-4 border-b border-slate-800">
+    <div className="min-h-screen bg-background text-ink flex flex-col justify-between p-4 sm:p-6 lg:p-10 transition-colors duration-200">
+      {/* Top bar with logo and back link */}
+      <header className="max-w-[560px] w-full mx-auto flex items-center justify-between pb-6">
         <Link 
           to="/" 
-          className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-white transition"
+          className="inline-flex items-center gap-1.5 text-[14px] font-medium text-muted hover:text-ink transition duration-150"
         >
-          <ArrowLeft className="w-4 h-4" />
-          <span>Live Dashboard</span>
+          <ArrowLeft className="w-4 h-4" strokeWidth={1.75} />
+          <span>Dashboard</span>
         </Link>
 
+        {/* Brand identity */}
         <div className="flex items-center gap-2">
-          <span className="mono text-xs font-bold text-slate-300 bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-700">
-            {boxId}
-          </span>
-          <button
-            onClick={checkChain}
-            disabled={loading}
-            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
-            title="Re-run verification"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-emerald-400' : ''}`} />
-          </button>
+          <div className="w-6 h-6 rounded-md bg-ink text-surface flex items-center justify-center">
+            <Box className="w-3.5 h-3.5" strokeWidth={2} />
+          </div>
+          <span className="text-[14px] font-semibold tracking-tight text-ink">TrustBox</span>
         </div>
-      </div>
 
-      {/* Main Verification Verdict Card */}
-      <div className="max-w-md w-full mx-auto my-auto py-6">
+        <button
+          onClick={checkChain}
+          disabled={loading}
+          className="p-1.5 rounded-lg text-muted hover:text-ink hover:bg-surface transition duration-150"
+          aria-label="Refresh audit"
+        >
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} strokeWidth={1.75} />
+        </button>
+      </header>
+
+      {/* Main card */}
+      <main className="max-w-[560px] w-full mx-auto my-auto py-6">
         {loading && !data ? (
-          <div className="text-center py-12">
-            <RefreshCw className="w-8 h-8 animate-spin text-emerald-400 mx-auto mb-3" />
-            <p className="text-sm text-slate-400 font-mono">Auditing cryptographic ledger...</p>
+          <div className="space-y-6 text-center py-10">
+            <div className="w-24 h-24 rounded-full mx-auto skeleton" />
+            <Skeleton className="h-10 w-48 mx-auto" />
+            <Skeleton className="h-5 w-64 mx-auto" />
+            <div className="pt-6 space-y-4">
+              <Skeleton className="h-12 w-full" />
+              <Skeleton className="h-12 w-full" />
+              <Skeleton className="h-12 w-full" />
+            </div>
+          </div>
+        ) : isTampered ? (
+          /* TAMPERED STATUS */
+          <div className="text-center animate-fade-in">
+            {/* 96px danger circle */}
+            <div className="w-24 h-24 rounded-full bg-danger-tint border border-danger/20 text-danger flex items-center justify-center mx-auto mb-6">
+              <X className="w-12 h-12" strokeWidth={2.25} />
+            </div>
+
+            <h1 className="text-[44px] sm:text-[48px] font-bold tracking-tight text-ink leading-tight">
+              Tampered
+            </h1>
+
+            <p className="mt-2 text-[16px] text-muted">
+              Records were changed after delivery began.
+            </p>
+
+            {data?.brokenAt !== null && data?.brokenAt !== undefined && (
+              <p className="mt-1 text-[14px] text-danger font-medium">
+                First problem found at reading #{data.brokenAt}
+              </p>
+            )}
+
+            {/* 3-row list with hairline dividers */}
+            <div className="mt-10 border-t border-hairline text-left divide-y divide-hairline">
+              <div className="py-4 flex items-center justify-between text-[15px]">
+                <span className="text-muted">Readings checked</span>
+                <span className="font-semibold text-ink tabular">{data?.count ?? 0}</span>
+              </div>
+
+              <div className="py-4 flex items-center justify-between text-[15px]">
+                <span className="text-muted">Last reading</span>
+                <span className="font-medium text-ink tabular">
+                  {lastAuditTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              </div>
+
+              <div className="py-4 flex items-center justify-between text-[15px]">
+                <span className="text-muted">Digital fingerprint</span>
+                <button
+                  onClick={copyFingerprint}
+                  className="inline-flex items-center gap-1.5 font-mono text-[13px] text-ink hover:text-muted transition"
+                  title="Copy full fingerprint"
+                >
+                  <span className="tabular">{shortFingerprint}</span>
+                  <Copy className="w-3.5 h-3.5 text-muted" strokeWidth={1.75} />
+                  {copied && <span className="text-[12px] text-safe font-sans font-medium">Copied</span>}
+                </button>
+              </div>
+            </div>
           </div>
         ) : isEmpty ? (
-          /* EMPTY: NO RECORDS STORED YET */
-          <div className="rounded-3xl border border-slate-700 bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 p-6 sm:p-8 text-center shadow-2xl animate-in zoom-in-95 duration-300">
-            <div className="mx-auto w-20 h-20 rounded-full bg-slate-800 border-2 border-slate-700 flex items-center justify-center text-slate-400 mb-5 shadow-lg">
-              <Inbox className="w-10 h-10" />
+          /* EMPTY STATE */
+          <div className="text-center animate-fade-in">
+            <div className="w-24 h-24 rounded-full bg-surface border border-hairline text-muted flex items-center justify-center mx-auto mb-6">
+              <Box className="w-10 h-10" strokeWidth={1.5} />
             </div>
 
-            <div className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-300 bg-slate-800 px-3 py-1 rounded-full border border-slate-700 mb-3">
-              Genesis State Intact
-            </div>
-
-            <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight mb-2">
-              0 Records Recorded
+            <h1 className="text-[40px] sm:text-[48px] font-bold tracking-tight text-ink leading-tight">
+              Awaiting data
             </h1>
 
-            <p className="text-xs sm:text-sm text-slate-400 mb-6 max-w-xs mx-auto leading-relaxed">
-              No telemetry entries exist for box <span className="mono text-white font-bold">{boxId}</span>. The cryptographic chain is awaiting its genesis record (seq #0).
+            <p className="mt-2 text-[16px] text-muted">
+              No readings recorded yet for box {boxId}.
             </p>
 
-            <div className="text-left bg-slate-950 p-3.5 rounded-2xl border border-slate-800">
-              <div className="flex items-center justify-between text-[11px] text-slate-400 mb-1.5">
-                <span className="flex items-center gap-1 font-semibold text-slate-300">
-                  <Lock className="w-3.5 h-3.5 text-slate-400" /> Genesis Prev-Hash Anchor
-                </span>
-                <button
-                  onClick={copyHash}
-                  className="flex items-center gap-1 text-slate-400 hover:text-white transition"
-                >
-                  {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copied ? 'Copied' : 'Copy'}</span>
-                </button>
+            <div className="mt-10 border-t border-hairline text-left divide-y divide-hairline">
+              <div className="py-4 flex items-center justify-between text-[15px]">
+                <span className="text-muted">Readings checked</span>
+                <span className="font-semibold text-ink tabular">0</span>
               </div>
-              <div className="mono text-[11px] text-slate-400 break-all select-all leading-snug">
-                {data?.genesisHash || '0000000000000000000000000000000000000000000000000000000000000000'}
-              </div>
-            </div>
-          </div>
-        ) : isIntact ? (
-          /* GREEN: CHAIN INTACT */
-          <div className="rounded-3xl border border-emerald-500/50 bg-gradient-to-b from-emerald-950/40 via-slate-900 to-slate-950 p-6 sm:p-8 text-center shadow-2xl glow-green animate-in zoom-in-95 duration-300">
-            <div className="mx-auto w-20 h-20 rounded-full bg-emerald-500/20 border-2 border-emerald-500/40 flex items-center justify-center text-emerald-400 mb-5 shadow-lg shadow-emerald-500/20">
-              <ShieldCheck className="w-12 h-12" />
-            </div>
-
-            <div className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-950/80 px-3 py-1 rounded-full border border-emerald-500/40 mb-3">
-              <Sparkles className="w-3.5 h-3.5" />
-              Cryptographic Audit Passed
-            </div>
-
-            <h1 className="text-3xl sm:text-4xl font-black text-white tracking-tight mb-2">
-              {data?.count || 0} Records Intact
-            </h1>
-
-            <p className="text-xs sm:text-sm text-slate-300 mb-6 max-w-xs mx-auto leading-relaxed">
-              Every telemetry record has been cryptographically verified against the previous record's SHA-256 hash and HMAC-SHA256 shared secret signature. Zero tampering detected.
-            </p>
-
-            {/* Metrics Breakdown */}
-            <div className="grid grid-cols-2 gap-2.5 text-left mb-6">
-              <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800">
-                <span className="text-[11px] text-slate-500 block">Verified Records</span>
-                <span className="text-lg font-bold text-white mono">{data?.count || 0}</span>
-              </div>
-              <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800">
-                <span className="text-[11px] text-slate-500 block">Genesis Anchor</span>
-                <span className="text-lg font-bold text-emerald-400 mono">Seq #0</span>
-              </div>
-            </div>
-
-            {/* Latest Hash Display */}
-            <div className="text-left bg-slate-950 p-3.5 rounded-2xl border border-slate-800">
-              <div className="flex items-center justify-between text-[11px] text-slate-400 mb-1.5">
-                <span className="flex items-center gap-1 font-semibold text-slate-300">
-                  <Lock className="w-3.5 h-3.5 text-emerald-400" /> Latest Chain Tip Hash
-                </span>
-                <button
-                  onClick={copyHash}
-                  className="flex items-center gap-1 text-emerald-400 hover:text-emerald-300 transition"
-                >
-                  {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copied ? 'Copied' : 'Copy'}</span>
-                </button>
-              </div>
-              <div className="mono text-[11px] text-emerald-400/90 break-all select-all leading-snug">
-                {data?.latestHash || '0000000000000000000000000000000000000000000000000000000000000000'}
+              <div className="py-4 flex items-center justify-between text-[15px]">
+                <span className="text-muted">Status</span>
+                <span className="font-medium text-muted">Awaiting initial reading</span>
               </div>
             </div>
           </div>
         ) : (
-          /* RED: TAMPER DETECTED */
-          <div className="rounded-3xl border border-rose-500/60 bg-gradient-to-b from-rose-950/50 via-slate-900 to-slate-950 p-6 sm:p-8 text-center shadow-2xl glow-red animate-in zoom-in-95 duration-300">
-            <div className="mx-auto w-20 h-20 rounded-full bg-rose-500/20 border-2 border-rose-500/50 flex items-center justify-center text-rose-400 mb-5 shadow-lg shadow-rose-500/30 animate-pulse">
-              <ShieldAlert className="w-12 h-12" />
+          /* VERIFIED STATUS */
+          <div className="text-center animate-fade-in">
+            {/* 96px safe circle */}
+            <div className="w-24 h-24 rounded-full bg-safe-tint border border-safe/20 text-safe flex items-center justify-center mx-auto mb-6">
+              <Check className="w-12 h-12" strokeWidth={2.25} />
             </div>
 
-            <div className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-rose-400 bg-rose-950/80 px-3 py-1 rounded-full border border-rose-500/50 mb-3">
-              <AlertTriangle className="w-3.5 h-3.5" />
-              Cryptographic Tamper Alert
-            </div>
-
-            <h1 className="text-3xl sm:text-4xl font-black text-rose-400 tracking-tight mb-2">
-              Tampered at #{data?.brokenAt ?? '?'}
+            <h1 className="text-[44px] sm:text-[48px] font-bold tracking-tight text-ink leading-tight">
+              Verified
             </h1>
 
-            <p className="text-xs sm:text-sm text-slate-300 mb-6 max-w-xs mx-auto leading-relaxed">
-              Cryptographic integrity failure. The record stored at sequence #{data?.brokenAt} does not match its hash chain linkage or HMAC shared secret signature.
+            <p className="mt-2 text-[16px] text-muted">
+              This delivery's records are untouched.
             </p>
 
-            {/* Tamper Forensic Reason */}
-            <div className="p-3.5 rounded-2xl bg-rose-950/80 border border-rose-500/40 text-left text-xs text-rose-200 mb-5">
-              <div className="font-bold text-white mb-1 flex items-center gap-1.5">
-                <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
-                Forensic Breakdown
+            {/* 3-row list with hairline dividers */}
+            <div className="mt-10 border-t border-hairline text-left divide-y divide-hairline">
+              <div className="py-4 flex items-center justify-between text-[15px]">
+                <span className="text-muted">Readings checked</span>
+                <span className="font-semibold text-ink tabular">{data?.count ?? 0}</span>
               </div>
-              <p className="text-[11px] text-rose-200/90 leading-relaxed">
-                {data?.reason || `Sequence #${data?.brokenAt} was modified in transit or storage without possessing the cryptographic shared secret DEVICE_KEY.`}
-              </p>
-            </div>
 
-            {/* Latest Hash Display */}
-            <div className="text-left bg-slate-950 p-3.5 rounded-2xl border border-slate-800">
-              <div className="flex items-center justify-between text-[11px] text-slate-400 mb-1.5">
-                <span className="flex items-center gap-1 font-semibold text-slate-300">
-                  <Lock className="w-3.5 h-3.5 text-rose-400" /> Chain Tip Hash
+              <div className="py-4 flex items-center justify-between text-[15px]">
+                <span className="text-muted">Last reading</span>
+                <span className="font-medium text-ink tabular">
+                  {lastAuditTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </span>
-                <button
-                  onClick={copyHash}
-                  className="flex items-center gap-1 text-slate-400 hover:text-white transition"
-                >
-                  {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copied ? 'Copied' : 'Copy'}</span>
-                </button>
               </div>
-              <div className="mono text-[11px] text-slate-400 break-all select-all leading-snug">
-                {data?.latestHash || '0000000000000000000000000000000000000000000000000000000000000000'}
+
+              <div className="py-4 flex items-center justify-between text-[15px]">
+                <span className="text-muted">Digital fingerprint</span>
+                <button
+                  onClick={copyFingerprint}
+                  className="inline-flex items-center gap-1.5 font-mono text-[13px] text-ink hover:text-muted transition"
+                  title="Copy full fingerprint"
+                >
+                  <span className="tabular">{shortFingerprint}</span>
+                  <Copy className="w-3.5 h-3.5 text-muted" strokeWidth={1.75} />
+                  {copied && <span className="text-[12px] text-safe font-sans font-medium">Copied</span>}
+                </button>
               </div>
             </div>
           </div>
         )}
 
-        <div className="mt-4 flex items-center justify-center gap-2 text-xs text-slate-500">
-          <Clock className="w-3.5 h-3.5" />
-          <span>Last audit: {lastChecked.toLocaleTimeString()}</span>
-        </div>
-      </div>
+        {/* Scan another box action */}
+        <div className="mt-8 text-center">
+          {!isScanning ? (
+            <button
+              onClick={() => setIsScanning(true)}
+              className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-[12px] bg-surface hover:bg-background border border-hairline text-ink text-[14px] font-medium transition duration-150"
+            >
+              <QrCode className="w-4 h-4 text-muted" strokeWidth={1.75} />
+              <span>Scan another box</span>
+            </button>
+          ) : (
+            <div className="relative p-6 rounded-20 bg-surface border border-hairline overflow-hidden animate-scale-in text-left">
+              {/* Thin corner bracket overlay */}
+              <div className="absolute top-3 left-3 w-3 h-3 border-t border-l border-ink" />
+              <div className="absolute top-3 right-3 w-3 h-3 border-t border-r border-ink" />
+              <div className="absolute bottom-3 left-3 w-3 h-3 border-b border-l border-ink" />
+              <div className="absolute bottom-3 right-3 w-3 h-3 border-b border-r border-ink" />
 
-      {/* Security Model Explanation Footer */}
-      <div className="max-w-md w-full mx-auto text-center pt-4 border-t border-slate-800/80 text-[11px] text-slate-500">
-        <p className="mb-1 font-medium text-slate-400">TrustBox Parametric Delivery Security</p>
-        <p className="text-[10px] text-slate-500 leading-normal">
-          Zero-trust verification powered by SHA-256 recursive hash chaining &amp; HMAC-SHA256 device authentication with a pre-shared secret key.
+              <div className="text-[12px] font-medium uppercase tracking-widest text-muted mb-2">
+                Verify Box ID
+              </div>
+
+              <form onSubmit={handleScanSubmit} className="flex gap-2">
+                <input
+                  type="text"
+                  value={scanInput}
+                  onChange={(e) => setScanInput(e.target.value)}
+                  placeholder="e.g. TB-001 or TB-DEMO-01"
+                  className="flex-1 px-3.5 py-2 rounded-[10px] bg-background border border-hairline text-[14px] text-ink focus:outline-none focus:ring-1 focus:ring-ink"
+                  autoFocus
+                />
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-[10px] bg-accent text-accent-ink text-[14px] font-medium hover:opacity-90 transition"
+                >
+                  Verify
+                </button>
+              </form>
+
+              <button
+                type="button"
+                onClick={() => setIsScanning(false)}
+                className="mt-3 text-[12px] text-muted hover:text-ink"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+        </div>
+      </main>
+
+      {/* Footer */}
+      <footer className="max-w-[560px] w-full mx-auto text-center pt-6 border-t border-hairline">
+        <p className="text-[12px] text-faint">
+          Every reading is sealed and cannot be changed without detection.
         </p>
-      </div>
+      </footer>
     </div>
   );
 }

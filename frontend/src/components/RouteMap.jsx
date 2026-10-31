@@ -1,7 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import L from 'leaflet';
 
-// Sample realistic medical cold-chain corridor route (Delhi International Airport Cargo Hub -> Apollo Hospital)
 const ROUTE_COORDINATES = [
   [28.5562, 77.1000], // Airport Cargo Gateway
   [28.5615, 77.1145],
@@ -11,7 +10,7 @@ const ROUTE_COORDINATES = [
   [28.5520, 77.2050],
   [28.5410, 77.2280],
   [28.5385, 77.2510],
-  [28.5398, 77.2750], // Apollo Regional Medical Center Hub
+  [28.5398, 77.2750], // Hospital Regional Center
 ];
 
 export default function RouteMap({ currentSeq = 0 }) {
@@ -23,60 +22,66 @@ export default function RouteMap({ currentSeq = 0 }) {
     if (!mapContainerRef.current) return;
 
     if (!mapInstanceRef.current) {
-      // Initialize Leaflet map
       const map = L.map(mapContainerRef.current, {
-        center: [28.555, 77.18],
+        center: [28.555, 77.185],
         zoom: 12,
         zoomControl: false,
-        attributionControl: false
+        attributionControl: false,
+        scrollWheelZoom: false,
       });
 
-      // OpenStreetMap tiles
+      // Position minimal zoom control at bottom-right
+      L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+      // Free, open standard tiles — 100% no API key required
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19
+        maxZoom: 18,
       }).addTo(map);
 
-      // Draw route polyline
-      const polyline = L.polyline(ROUTE_COORDINATES, {
-        color: '#10b981',
-        weight: 4,
-        opacity: 0.8,
-        dashArray: '8, 8'
+      const isDark = document.documentElement.classList.contains('dark');
+      const lineColor = isDark ? '#FAFAFA' : '#0A0A0A';
+
+      // Thin 2px route line
+      L.polyline(ROUTE_COORDINATES, {
+        color: lineColor,
+        weight: 2,
+        opacity: 0.9,
+        lineCap: 'round',
+        lineJoin: 'round',
       }).addTo(map);
 
-      // Start Marker
+      // Origin point marker (Airport)
       L.circleMarker(ROUTE_COORDINATES[0], {
-        radius: 7,
-        fillColor: '#3b82f6',
-        color: '#ffffff',
-        weight: 2,
-        fillOpacity: 1
-      }).bindTooltip('Origin: Airport Pharma Cargo', { permanent: false }).addTo(map);
+        radius: 4,
+        fillColor: lineColor,
+        color: '#FFFFFF',
+        weight: 1.5,
+        fillOpacity: 1,
+      }).addTo(map);
 
-      // Destination Marker
+      // Destination point marker (Hospital)
       L.circleMarker(ROUTE_COORDINATES[ROUTE_COORDINATES.length - 1], {
-        radius: 7,
-        fillColor: '#ec4899',
-        color: '#ffffff',
+        radius: 4,
+        fillColor: '#9CA3AF',
+        color: '#FFFFFF',
+        weight: 1.5,
+        fillOpacity: 1,
+      }).addTo(map);
+
+      // Moving Box Marker: small circle marker with white ring
+      const boxMarker = L.circleMarker(ROUTE_COORDINATES[0], {
+        radius: 6,
+        fillColor: lineColor,
+        color: '#FFFFFF',
         weight: 2,
-        fillOpacity: 1
-      }).bindTooltip('Destination: Regional Hospital', { permanent: false }).addTo(map);
+        fillOpacity: 1,
+      }).addTo(map);
 
-      // Moving Box Marker
-      const boxIcon = L.divIcon({
-        className: 'custom-box-pin',
-        html: `<div style="background-color: #10b981; width: 22px; height: 22px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 12px #10b981;"></div>`,
-        iconSize: [22, 22],
-        iconAnchor: [11, 11]
-      });
-
-      const currentMarker = L.marker(ROUTE_COORDINATES[0], { icon: boxIcon }).addTo(map);
-      markerRef.current = currentMarker;
+      markerRef.current = boxMarker;
       mapInstanceRef.current = map;
     }
 
     return () => {
-      // Map cleanup on unmount
       if (mapInstanceRef.current) {
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;
@@ -84,7 +89,7 @@ export default function RouteMap({ currentSeq = 0 }) {
     };
   }, []);
 
-  // Update marker position as seq advances
+  // Update marker position on sequence advance
   useEffect(() => {
     if (!markerRef.current) return;
     const pointIndex = currentSeq % ROUTE_COORDINATES.length;
@@ -93,20 +98,14 @@ export default function RouteMap({ currentSeq = 0 }) {
   }, [currentSeq]);
 
   return (
-    <div className="relative w-full h-full min-h-[260px] rounded-xl overflow-hidden border border-slate-800 shadow-inner">
-      {/* Required Simulated Route Banner */}
-      <div className="absolute top-3 left-3 z-[1000] bg-slate-900/90 backdrop-blur-md border border-amber-500/50 text-amber-400 text-xs font-semibold px-3 py-1.5 rounded-lg shadow-lg flex items-center gap-1.5">
-        <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping inline-block"></span>
-        <span>SIMULATED ROUTE</span>
-        <span className="text-slate-400 font-normal">| Device has no onboard GPS</span>
-      </div>
-
-      <div className="absolute bottom-3 right-3 z-[1000] bg-slate-900/90 backdrop-blur-md border border-slate-700 text-slate-300 text-[11px] px-2.5 py-1 rounded shadow">
-        Waypoint #{currentSeq % ROUTE_COORDINATES.length + 1} of {ROUTE_COORDINATES.length}
+    <div className="relative w-full h-[320px] rounded-20 overflow-hidden bg-surface border border-hairline">
+      <div className="absolute top-4 left-4 z-[400] flex items-center gap-2 pointer-events-none">
+        <span className="text-[12px] font-medium tracking-tight bg-surface/90 backdrop-blur-sm px-2.5 py-1 rounded-md border border-hairline text-muted">
+          Airport Hub → Regional Center
+        </span>
       </div>
 
       <div ref={mapContainerRef} className="w-full h-full" />
     </div>
   );
 }
-
