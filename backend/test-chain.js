@@ -5,7 +5,8 @@ const {
   computeHash, 
   computeSignature, 
   signRecord, 
-  verifyChain 
+  verifyChain,
+  verifySingleRecord
 } = require('./chain');
 
 const TEST_KEY = 'trustbox-test-secret-key-12345';
@@ -95,6 +96,43 @@ const verifyResultTamperedSig = verifyChain(tamperedChainSig, TEST_KEY);
 assert.strictEqual(verifyResultTamperedSig.ok, false, 'Invalid HMAC must fail');
 assert.strictEqual(verifyResultTamperedSig.brokenAt, 2, 'Must identify record #2 signature forgery');
 console.log(` Test 6: Detected invalid cryptographic signature at seq #${verifyResultTamperedSig.brokenAt}.`);
+
+// Test 7: Missing genesis record detection
+const missingGenesisChain = chain.slice(1);
+const verifyResultMissingGenesis = verifyChain(missingGenesisChain, TEST_KEY);
+assert.strictEqual(verifyResultMissingGenesis.ok, false, 'Chain starting without seq #0 must fail');
+assert.strictEqual(verifyResultMissingGenesis.brokenAt, 1, 'Must flag first record as missing genesis');
+console.log(` Test 7: Detected missing genesis block (starts at #${verifyResultMissingGenesis.brokenAt}).`);
+
+// Test 8: Sequence gap detection
+const gapChain = [chain[0], chain[1], chain[3]]; // skipped seq #2
+const verifyResultGap = verifyChain(gapChain, TEST_KEY);
+assert.strictEqual(verifyResultGap.ok, false, 'Chain with sequence gap must fail');
+assert.strictEqual(verifyResultGap.brokenAt, 3, 'Must detect gap at sequence #3');
+console.log(` Test 8: Detected sequence gap at seq #${verifyResultGap.brokenAt}.`);
+
+// Test 9: Duplicate sequence detection
+const duplicateChain = [chain[0], chain[1], chain[1]];
+const verifyResultDup = verifyChain(duplicateChain, TEST_KEY);
+assert.strictEqual(verifyResultDup.ok, false, 'Duplicate sequence must fail');
+assert.strictEqual(verifyResultDup.brokenAt, 1, 'Must detect duplicate at sequence #1');
+console.log(` Test 9: Detected duplicate sequence at seq #${verifyResultDup.brokenAt}.`);
+
+// Test 10: Empty chain honest representation
+const emptyResult = verifyChain([], TEST_KEY);
+assert.strictEqual(emptyResult.ok, true, 'Empty chain ok is true');
+assert.strictEqual(emptyResult.empty, true, 'Empty chain should set empty: true');
+assert.strictEqual(emptyResult.count, 0, 'Empty chain count is 0');
+assert.strictEqual(emptyResult.latestHash, null, 'Empty chain latestHash is null');
+console.log(' Test 10: Empty chain honestly reports 0 records with empty=true.');
+
+// Test 11: Single record signature and hash verification
+const validSingle = verifySingleRecord(chain[0], TEST_KEY);
+assert.strictEqual(validSingle.valid, true, 'Valid single record must pass');
+const tamperedSingle = { ...chain[0], temp_c: 99.9 };
+const invalidSingle = verifySingleRecord(tamperedSingle, TEST_KEY);
+assert.strictEqual(invalidSingle.valid, false, 'Tampered single record must fail');
+console.log(' Test 11: Single record cryptographic verification function verified.');
 
 console.log('\n🎉 ALL CRYPTOGRAPHIC CHAIN & INTEGRITY TESTS PASSED!');
 

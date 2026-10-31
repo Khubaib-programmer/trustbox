@@ -60,16 +60,25 @@ function signRecord(record, deviceKey) {
 
 /**
  * Verifies full chain of records for a box.
- * Sorts by seq ascending and finds the first tamper/mismatch.
- * Returns: { ok: boolean, count: number, brokenAt: number|null, latestHash: string|null, reason?: string }
+ * Sorts by seq ascending and checks:
+ * 1. Genesis record starts at seq 0 with 64-zero prev_hash
+ * 2. Strict sequence number continuity (no gaps or duplicates)
+ * 3. Previous hash cryptographic linkage
+ * 4. SHA-256 canonical hash integrity
+ * 5. HMAC-SHA256 device key signature validity
+ *
+ * Returns: { ok: boolean, empty?: boolean, count: number, brokenAt: number|null, latestHash: string|null, reason?: string, genesisHash?: string }
  */
 function verifyChain(records, deviceKey) {
   if (!records || records.length === 0) {
     return {
       ok: true,
+      empty: true,
       count: 0,
       brokenAt: null,
-      latestHash: null
+      latestHash: null,
+      genesisHash: GENESIS_PREV_HASH,
+      reason: 'No telemetry records stored for this box ID.'
     };
   }
 
@@ -80,7 +89,40 @@ function verifyChain(records, deviceKey) {
   for (let i = 0; i < sorted.length; i++) {
     const record = sorted[i];
 
-    // 1. Verify prev_hash
+    // 1. Check sequence ordering and continuity
+    if (i === 0) {
+      if (record.seq !== 0) {
+        return {
+          ok: false,
+          count: sorted.length,
+          brokenAt: record.seq,
+          latestHash,
+          reason: `Genesis block missing at seq #${record.seq}. Expected sequence #0 as initial record.`
+        };
+      }
+    } else {
+      const prevRecord = sorted[i - 1];
+      if (record.seq === prevRecord.seq) {
+        return {
+          ok: false,
+          count: sorted.length,
+          brokenAt: record.seq,
+          latestHash,
+          reason: `Duplicate sequence number detected at seq #${record.seq}.`
+        };
+      }
+      if (record.seq !== prevRecord.seq + 1) {
+        return {
+          ok: false,
+          count: sorted.length,
+          brokenAt: record.seq,
+          latestHash,
+          reason: `Sequence discontinuity detected at seq #${record.seq}. Expected #${prevRecord.seq + 1}, gap detected.`
+        };
+      }
+    }
+
+    // 2. Verify prev_hash continuity
     const expectedPrevHash = (i === 0) ? GENESIS_PREV_HASH : sorted[i - 1].hash;
     if ((record.prev_hash || '').toLowerCase() !== expectedPrevHash.toLowerCase()) {
       return {
@@ -92,7 +134,7 @@ function verifyChain(records, deviceKey) {
       };
     }
 
-    // 2. Recompute hash
+    // 3. Recompute canonical SHA-256 hash
     const canonical = buildCanonicalString(record);
     const expectedHash = computeHash(canonical);
     if ((record.hash || '').toLowerCase() !== expectedHash) {
@@ -105,7 +147,7 @@ function verifyChain(records, deviceKey) {
       };
     }
 
-    // 3. Verify HMAC signature
+    // 4. Verify HMAC-SHA256 signature using shared secret DEVICE_KEY
     const expectedSig = computeSignature(deviceKey, record.hash);
     if ((record.sig || '').toLowerCase() !== expectedSig) {
       return {
@@ -113,17 +155,45 @@ function verifyChain(records, deviceKey) {
         count: sorted.length,
         brokenAt: record.seq,
         latestHash,
-        reason: `Cryptographic signature mismatch at seq #${record.seq}`
+        reason: `HMAC signature mismatch at seq #${record.seq}. Shared secret signature does not match.`
       };
     }
   }
 
   return {
     ok: true,
+    empty: false,
     count: sorted.length,
     brokenAt: null,
     latestHash
   };
+}
+
+/**
+ * Validates a single incoming record's cryptographic integrity and signature.
+ */
+function verifySingleRecord(record, deviceKey) {
+  if (!record || typeof record !== 'object') {
+    return { valid: false, error: 'Record must be a non-empty object.' };
+  }
+  const canonical = buildCanonicalString(record);
+  const expectedHash = computeHash(canonical);
+  if ((record.hash || '').toLowerCase() !== expectedHash) {
+    return {
+      valid: false,
+      error: `Calculated hash (${expectedHash}) does not match payload hash (${record.hash}).`
+    };
+  }
+
+  const expectedSig = computeSignature(deviceKey, record.hash);
+  if ((record.sig || '').toLowerCase() !== expectedSig) {
+    return {
+      valid: false,
+      error: 'HMAC signature verification failed. Invalid DEVICE_KEY signature.'
+    };
+  }
+
+  return { valid: true };
 }
 
 module.exports = {
@@ -132,6 +202,7 @@ module.exports = {
   computeHash,
   computeSignature,
   signRecord,
-  verifyChain
+  verifyChain,
+  verifySingleRecord
 };
 

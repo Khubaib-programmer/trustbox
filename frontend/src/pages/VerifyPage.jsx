@@ -11,7 +11,8 @@ import {
   Lock,
   Layers,
   Clock,
-  Sparkles
+  Sparkles,
+  Inbox
 } from 'lucide-react';
 import { io } from 'socket.io-client';
 
@@ -25,13 +26,18 @@ export default function VerifyPage() {
   const checkChain = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/verify/${boxId}`);
+      const res = await fetch(`/api/verify/${encodeURIComponent(boxId)}`);
       const json = await res.json();
       setData(json);
       setLastChecked(new Date());
     } catch (e) {
       console.error('Verification request failed:', e);
-      setData({ ok: false, count: 0, brokenAt: 0, reason: 'Failed to communicate with verification node.' });
+      setData({ 
+        ok: false, 
+        count: 0, 
+        brokenAt: 0, 
+        reason: 'Failed to communicate with verification backend on port 4000.' 
+      });
     } finally {
       setLoading(false);
     }
@@ -58,29 +64,30 @@ export default function VerifyPage() {
   }, [boxId]);
 
   const copyHash = () => {
-    if (data?.latestHash) {
-      navigator.clipboard.writeText(data.latestHash);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
+    const hashToCopy = data?.latestHash || data?.genesisHash || '0000000000000000000000000000000000000000000000000000000000000000';
+    navigator.clipboard.writeText(hashToCopy);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
-  const isIntact = data?.ok === true;
+  const isEmpty = data && (data.count === 0 || data.empty === true);
+  const isIntact = data && data.ok === true && !isEmpty;
+  const isTampered = data && data.ok === false;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between p-4 sm:p-6 lg:p-8">
-      {/* Mobile-Friendly Top Bar */}
+      {/* Top Header Bar */}
       <div className="max-w-md w-full mx-auto flex items-center justify-between pb-4 border-b border-slate-800">
         <Link 
           to="/" 
           className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-white transition"
         >
           <ArrowLeft className="w-4 h-4" />
-          <span>Dashboard</span>
+          <span>Live Dashboard</span>
         </Link>
 
         <div className="flex items-center gap-2">
-          <span className="mono text-xs font-bold text-slate-300 bg-slate-900 px-2 py-1 rounded border border-slate-700">
+          <span className="mono text-xs font-bold text-slate-300 bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-700">
             {boxId}
           </span>
           <button
@@ -101,6 +108,43 @@ export default function VerifyPage() {
             <RefreshCw className="w-8 h-8 animate-spin text-emerald-400 mx-auto mb-3" />
             <p className="text-sm text-slate-400 font-mono">Auditing cryptographic ledger...</p>
           </div>
+        ) : isEmpty ? (
+          /* EMPTY: NO RECORDS STORED YET */
+          <div className="rounded-3xl border border-slate-700 bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 p-6 sm:p-8 text-center shadow-2xl animate-in zoom-in-95 duration-300">
+            <div className="mx-auto w-20 h-20 rounded-full bg-slate-800 border-2 border-slate-700 flex items-center justify-center text-slate-400 mb-5 shadow-lg">
+              <Inbox className="w-10 h-10" />
+            </div>
+
+            <div className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-300 bg-slate-800 px-3 py-1 rounded-full border border-slate-700 mb-3">
+              Genesis State Intact
+            </div>
+
+            <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight mb-2">
+              0 Records Recorded
+            </h1>
+
+            <p className="text-xs sm:text-sm text-slate-400 mb-6 max-w-xs mx-auto leading-relaxed">
+              No telemetry entries exist for box <span className="mono text-white font-bold">{boxId}</span>. The cryptographic chain is awaiting its genesis record (seq #0).
+            </p>
+
+            <div className="text-left bg-slate-950 p-3.5 rounded-2xl border border-slate-800">
+              <div className="flex items-center justify-between text-[11px] text-slate-400 mb-1.5">
+                <span className="flex items-center gap-1 font-semibold text-slate-300">
+                  <Lock className="w-3.5 h-3.5 text-slate-400" /> Genesis Prev-Hash Anchor
+                </span>
+                <button
+                  onClick={copyHash}
+                  className="flex items-center gap-1 text-slate-400 hover:text-white transition"
+                >
+                  {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copied ? 'Copied' : 'Copy'}</span>
+                </button>
+              </div>
+              <div className="mono text-[11px] text-slate-400 break-all select-all leading-snug">
+                {data?.genesisHash || '0000000000000000000000000000000000000000000000000000000000000000'}
+              </div>
+            </div>
+          </div>
         ) : isIntact ? (
           /* GREEN: CHAIN INTACT */
           <div className="rounded-3xl border border-emerald-500/50 bg-gradient-to-b from-emerald-950/40 via-slate-900 to-slate-950 p-6 sm:p-8 text-center shadow-2xl glow-green animate-in zoom-in-95 duration-300">
@@ -118,7 +162,7 @@ export default function VerifyPage() {
             </h1>
 
             <p className="text-xs sm:text-sm text-slate-300 mb-6 max-w-xs mx-auto leading-relaxed">
-              Every telemetry record has been cryptographically verified against the previous record's SHA-256 hash and HMAC-SHA256 device key signature. Zero tampering detected.
+              Every telemetry record has been cryptographically verified against the previous record's SHA-256 hash and HMAC-SHA256 shared secret signature. Zero tampering detected.
             </p>
 
             {/* Metrics Breakdown */}
@@ -128,7 +172,7 @@ export default function VerifyPage() {
                 <span className="text-lg font-bold text-white mono">{data?.count || 0}</span>
               </div>
               <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800">
-                <span className="text-[11px] text-slate-500 block">Genesis Block</span>
+                <span className="text-[11px] text-slate-500 block">Genesis Anchor</span>
                 <span className="text-lg font-bold text-emerald-400 mono">Seq #0</span>
               </div>
             </div>
@@ -137,7 +181,7 @@ export default function VerifyPage() {
             <div className="text-left bg-slate-950 p-3.5 rounded-2xl border border-slate-800">
               <div className="flex items-center justify-between text-[11px] text-slate-400 mb-1.5">
                 <span className="flex items-center gap-1 font-semibold text-slate-300">
-                  <Lock className="w-3.5 h-3.5 text-emerald-400" /> Latest Block Hash
+                  <Lock className="w-3.5 h-3.5 text-emerald-400" /> Latest Chain Tip Hash
                 </span>
                 <button
                   onClick={copyHash}
@@ -169,7 +213,7 @@ export default function VerifyPage() {
             </h1>
 
             <p className="text-xs sm:text-sm text-slate-300 mb-6 max-w-xs mx-auto leading-relaxed">
-              Cryptographic integrity failure. The record stored at sequence #{data?.brokenAt} does not match its hash or device signature.
+              Cryptographic integrity failure. The record stored at sequence #{data?.brokenAt} does not match its hash chain linkage or HMAC shared secret signature.
             </p>
 
             {/* Tamper Forensic Reason */}
@@ -179,7 +223,7 @@ export default function VerifyPage() {
                 Forensic Breakdown
               </div>
               <p className="text-[11px] text-rose-200/90 leading-relaxed">
-                {data?.reason || `Sequence #${data?.brokenAt} was modified in transit or database storage without possessing the cryptographic DEVICE_KEY.`}
+                {data?.reason || `Sequence #${data?.brokenAt} was modified in transit or storage without possessing the cryptographic shared secret DEVICE_KEY.`}
               </p>
             </div>
 
@@ -210,11 +254,13 @@ export default function VerifyPage() {
         </div>
       </div>
 
-      {/* Footer Info */}
+      {/* Security Model Explanation Footer */}
       <div className="max-w-md w-full mx-auto text-center pt-4 border-t border-slate-800/80 text-[11px] text-slate-500">
-        TrustBox Parametric Delivery Security &middot; SHA-256 + HMAC-SHA256
+        <p className="mb-1 font-medium text-slate-400">TrustBox Parametric Delivery Security</p>
+        <p className="text-[10px] text-slate-500 leading-normal">
+          Zero-trust verification powered by SHA-256 recursive hash chaining &amp; HMAC-SHA256 device authentication with a pre-shared secret key.
+        </p>
       </div>
     </div>
   );
 }
-

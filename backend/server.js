@@ -6,7 +6,7 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 const mqtt = require('mqtt');
 const { Record, Claim, Payout } = require('./models');
-const { verifyChain } = require('./chain');
+const { verifyChain, verifySingleRecord, GENESIS_PREV_HASH } = require('./chain');
 const InsuranceEngine = require('./insurance');
 
 const app = express();
@@ -26,7 +26,7 @@ const io = new Server(server, {
 
 // Environment Configuration
 const PORT = process.env.PORT || 4000;
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/trustbox';
+const MONGO_URI = process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/trustbox';
 const MQTT_URL = process.env.MQTT_URL; // e.g. mqtts://xxxx.hivemq.cloud:8883
 const MQTT_USER = process.env.MQTT_USER;
 const MQTT_PASS = process.env.MQTT_PASS;
@@ -70,42 +70,140 @@ const insuranceEngine = new InsuranceEngine({
 });
 
 /**
- * Handle new record ingestion (from MQTT or REST)
+ * Helper to get the most recent record for a box ID
  */
-async function handleIncomingRecord(record) {
-  const boxId = record.box_id;
+async function getLatestBoxRecord(boxId) {
+  if (isMongoConnected) {
+    return await Record.findOne({ box_id: boxId }).sort({ seq: -1 }).lean();
+  } else {
+    const list = inMemoryRecords.get(boxId) || [];
+    return list.length > 0 ? list[list.length - 1] : null;
+  }
+}
+
+/**
+ * Validates payload schema and physical range limits
+ */
+function validateRecordPayload(record) {
+  if (!record || typeof record !== 'object') {
+    return { valid: false, status: 400, error: 'Record payload must be a JSON object.' };
+  }
+  const { box_id, seq, ts, temp_c, humidity, shock, tilt, flipped, light, lid_open, event, prev_hash, hash, sig } = record;
+
+  if (!box_id || typeof box_id !== 'string' || box_id.trim().length === 0) {
+    return { valid: false, status: 400, error: 'Field "box_id" is required and must be a non-empty string.' };
+  }
+  if (seq === undefined || seq === null || isNaN(parseInt(seq, 10)) || parseInt(seq, 10) < 0) {
+    return { valid: false, status: 400, error: 'Field "seq" must be a non-negative integer.' };
+  }
+  if (ts === undefined || ts === null || isNaN(parseInt(ts, 10)) || parseInt(ts, 10) <= 0) {
+    return { valid: false, status: 400, error: 'Field "ts" must be a valid positive UNIX timestamp in seconds.' };
+  }
+  if (temp_c === undefined || isNaN(Number(temp_c)) || Number(temp_c) < -60 || Number(temp_c) > 120) {
+    return { valid: false, status: 400, error: 'Field "temp_c" out of realistic physical range (-60°C to 120°C).' };
+  }
+  if (humidity === undefined || isNaN(Number(humidity)) || Number(humidity) < 0 || Number(humidity) > 100) {
+    return { valid: false, status: 400, error: 'Field "humidity" out of valid percentage range (0% to 100%).' };
+  }
+  if (!prev_hash || typeof prev_hash !== 'string' || prev_hash.length !== 64) {
+    return { valid: false, status: 400, error: 'Field "prev_hash" must be a 64-character hex string.' };
+  }
+  if (!hash || typeof hash !== 'string' || hash.length !== 64) {
+    return { valid: false, status: 400, error: 'Field "hash" must be a 64-character SHA-256 hex string.' };
+  }
+  if (!sig || typeof sig !== 'string' || sig.length !== 64) {
+    return { valid: false, status: 400, error: 'Field "sig" must be a 64-character HMAC-SHA256 hex signature.' };
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Handle new record ingestion (from MQTT or REST) with validation,
+ * cryptographic verification, and strict sequence/chain continuity.
+ */
+async function handleIncomingRecord(record, source = 'REST') {
+  // 1. Schema & Range Validation
+  const valResult = validateRecordPayload(record);
+  if (!valResult.valid) {
+    return { success: false, status: valResult.status, error: valResult.error };
+  }
+
+  const boxId = String(record.box_id).trim();
   const seq = parseInt(record.seq, 10);
 
-  try {
-    let savedRecord = record;
+  // 2. Cryptographic Signature & Hash Verification
+  const cryptoCheck = verifySingleRecord(record, DEVICE_KEY);
+  if (!cryptoCheck.valid) {
+    console.warn(`[INGEST REJECTED] Cryptographic verification failed for ${boxId} #${seq}: ${cryptoCheck.error}`);
+    return { success: false, status: 401, error: cryptoCheck.error };
+  }
 
-    if (isMongoConnected) {
-      // Check duplicate
-      const exists = await Record.findOne({ box_id: boxId, seq });
-      if (exists) {
-        console.log(`[INGEST] Duplicate record rejected: ${boxId} #${seq}`);
-        return;
+  // 3. Chain Continuity & Duplicate Sequence Validation
+  try {
+    const latest = await getLatestBoxRecord(boxId);
+
+    if (!latest) {
+      // New box device: must start at seq 0 with GENESIS_PREV_HASH
+      if (seq !== 0) {
+        return {
+          success: false,
+          status: 400,
+          error: `First record for new box ${boxId} must have sequence #0. Received #${seq}.`
+        };
       }
+      if (record.prev_hash.toLowerCase() !== GENESIS_PREV_HASH.toLowerCase()) {
+        return {
+          success: false,
+          status: 400,
+          error: `Genesis record (seq #0) must use 64-zero genesis prev_hash.`
+        };
+      }
+    } else {
+      // Subsequent records: must continue chain strictly
+      if (seq <= latest.seq) {
+        console.log(`[INGEST DUPLICATE] Duplicate/outdated record rejected: ${boxId} #${seq} (latest is #${latest.seq})`);
+        return {
+          success: false,
+          status: 409,
+          error: `Duplicate sequence number #${seq} for box ${boxId}. Current latest sequence is #${latest.seq}.`
+        };
+      }
+      if (seq !== latest.seq + 1) {
+        return {
+          success: false,
+          status: 400,
+          error: `Sequence gap detected for box ${boxId}. Expected #${latest.seq + 1}, received #${seq}.`
+        };
+      }
+      if (record.prev_hash.toLowerCase() !== latest.hash.toLowerCase()) {
+        return {
+          success: false,
+          status: 400,
+          error: `Chain broken: record #${seq} prev_hash (${record.prev_hash.substring(0, 10)}...) does not match previous record #${latest.seq} hash (${latest.hash.substring(0, 10)}...).`
+        };
+      }
+    }
+
+    // 4. Persistence
+    let savedRecord = record;
+    if (isMongoConnected) {
       savedRecord = await Record.create(record);
     } else {
       const boxRecords = inMemoryRecords.get(boxId) || [];
-      if (boxRecords.some(r => r.seq === seq)) {
-        console.log(`[INGEST] Duplicate record rejected (memory): ${boxId} #${seq}`);
-        return;
-      }
       boxRecords.push(record);
       boxRecords.sort((a, b) => a.seq - b.seq);
       inMemoryRecords.set(boxId, boxRecords);
       savedRecord = record;
     }
 
-    // Broadcast live over Socket.io
+    // 5. Broadcast live over Socket.io
     io.emit('record', savedRecord);
     if (record.event && record.event !== 'NONE') {
       io.emit('event', savedRecord);
     }
 
-    // Pass through insurance evaluation
+    // 6. Pass through parametric insurance evaluation
     await insuranceEngine.processRecord(
       record,
       isMongoConnected ? Claim : null,
@@ -113,12 +211,15 @@ async function handleIncomingRecord(record) {
       io
     );
 
-    console.log(`[RECORD] ${boxId} #${seq} | Temp: ${record.temp_c}°C | Event: ${record.event} | Hash: ${record.hash.substring(0, 8)}...`);
+    console.log(`[RECORD ${source}] ${boxId} #${seq} | Temp: ${record.temp_c}°C | Event: ${record.event} | Hash: ${record.hash.substring(0, 8)}...`);
+    return { success: true, record: savedRecord };
   } catch (err) {
     if (err.code === 11000) {
       console.log(`[INGEST] Mongo duplicate key on ${boxId} #${seq}`);
+      return { success: false, status: 409, error: `Record ${boxId} #${seq} already exists in database.` };
     } else {
       console.error('[INGEST ERROR]', err);
+      return { success: false, status: 500, error: 'Internal storage error during record ingestion.' };
     }
   }
 }
@@ -148,7 +249,7 @@ if (MQTT_URL) {
   mqttClient.on('message', async (topic, message) => {
     try {
       const payload = JSON.parse(message.toString());
-      await handleIncomingRecord(payload);
+      await handleIncomingRecord(payload, 'MQTT');
     } catch (e) {
       console.error(`[MQTT ERROR] Failed parsing message on ${topic}:`, e.message);
     }
@@ -165,14 +266,88 @@ if (MQTT_URL) {
 // REST API ENDPOINTS
 // ==========================================
 
+// Root status endpoint
+app.get('/', (req, res) => {
+  res.json({
+    status: 'online',
+    service: 'TrustBox Backend API',
+    mongoConnected: isMongoConnected,
+    frontend: 'http://localhost:3000',
+    endpoints: {
+      records: '/api/records/:boxId',
+      verify: '/api/verify/:boxId',
+      claims: '/api/claims/:boxId',
+      payouts: '/api/payouts/:boxId',
+      boxes: '/api/boxes',
+      latest_device_state: '/api/devices/:boxId/latest',
+      tamper: 'POST /api/admin/tamper/:boxId/:seq',
+      reset: 'POST /api/admin/reset/:boxId'
+    }
+  });
+});
+
 // 1. Direct record ingestion endpoint (for testing or direct HTTP push)
 app.post('/api/records', async (req, res) => {
   const record = req.body;
-  if (!record || !record.box_id || record.seq === undefined) {
-    return res.status(400).json({ error: 'Invalid record format. box_id and seq are required.' });
+  const result = await handleIncomingRecord(record, 'HTTP');
+  if (!result.success) {
+    return res.status(result.status || 400).json({ error: result.error });
   }
-  await handleIncomingRecord(record);
-  res.status(201).json({ status: 'received', box_id: record.box_id, seq: record.seq });
+  res.status(201).json({ 
+    status: 'received', 
+    box_id: record.box_id, 
+    seq: record.seq, 
+    hash: record.hash 
+  });
+});
+
+// 1b. GET /api/devices/:boxId/latest -> Retrieve latest state to resume chain safely
+app.get('/api/devices/:boxId/latest', async (req, res) => {
+  const { boxId } = req.params;
+  try {
+    const latest = await getLatestBoxRecord(boxId);
+    if (latest) {
+      res.json({
+        box_id: boxId,
+        exists: true,
+        latestSeq: latest.seq,
+        latestHash: latest.hash,
+        nextSeq: latest.seq + 1,
+        prevHash: latest.hash,
+        timestamp: latest.ts
+      });
+    } else {
+      res.json({
+        box_id: boxId,
+        exists: false,
+        latestSeq: null,
+        latestHash: null,
+        nextSeq: 0,
+        prevHash: GENESIS_PREV_HASH
+      });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 1c. GET /api/boxes -> List all known box IDs in system
+app.get('/api/boxes', async (req, res) => {
+  try {
+    let boxes = [];
+    if (isMongoConnected) {
+      boxes = await Record.distinct('box_id');
+    } else {
+      boxes = Array.from(inMemoryRecords.keys());
+    }
+    // Ensure standard boxes appear in list if none exist
+    if (boxes.length === 0) {
+      boxes = ['TB-001', 'TB-TEST'];
+    }
+    res.json({ boxes });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // 2. GET /api/verify/:boxId -> Chain verification endpoint
@@ -288,6 +463,15 @@ app.get('/api/payouts/:boxId', async (req, res) => {
 // 7. POST /api/admin/reset/:boxId -> Reset demo state
 app.post('/api/admin/reset/:boxId', async (req, res) => {
   const { boxId } = req.params;
+  const { confirm } = req.body || {};
+
+  // Protect reference test device from accidental reset
+  if (boxId === 'TB-TEST' && confirm !== true) {
+    return res.status(403).json({
+      error: 'Reset of reference test device TB-TEST is protected. Pass { "confirm": true } in request body to confirm.'
+    });
+  }
+
   try {
     if (isMongoConnected) {
       await Record.deleteMany({ box_id: boxId });

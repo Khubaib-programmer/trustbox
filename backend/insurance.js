@@ -64,7 +64,7 @@ class InsuranceEngine {
 
         const payoutData = {
           payout_id: this.generatePayoutId(),
-          claim_id: savedClaim._id || savedClaim.triggerSeq,
+          claim_id: String(savedClaim._id || savedClaim.triggerSeq || 'claim_drop'),
           box_id: boxId,
           amount_inr: 25000,
           currency: 'INR',
@@ -126,7 +126,7 @@ class InsuranceEngine {
 
           const payoutData = {
             payout_id: this.generatePayoutId(),
-            claim_id: savedClaim._id || savedClaim.triggerSeq,
+            claim_id: String(savedClaim._id || savedClaim.triggerSeq || 'claim_temp'),
             box_id: boxId,
             amount_inr: 50000,
             currency: 'INR',

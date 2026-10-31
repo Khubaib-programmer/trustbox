@@ -8,7 +8,10 @@
     "dev": "node server.js",
     "simulate": "node fake-publisher.js",
     "simulate:heat": "node fake-publisher.js --heat",
-    "simulate:drop": "node fake-publisher.js --drop"
+    "simulate:drop": "node fake-publisher.js --drop",
+    "test": "node test-chain.js",
+    "test:chain": "node test-chain.js",
+    "test:api": "node test-api.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

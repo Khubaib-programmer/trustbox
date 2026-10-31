@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { io } from 'socket.io-client';
 import { 
   ResponsiveContainer, 
@@ -25,7 +25,9 @@ import {
   AlertTriangle,
   Radio,
   ExternalLink,
-  Clock
+  Clock,
+  Inbox,
+  RefreshCw
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import RouteMap from '../components/RouteMap';
@@ -34,124 +36,263 @@ import QRCodeModal from '../components/QRCodeModal';
 
 export default function Dashboard() {
   const [boxId, setBoxId] = useState('TB-001');
+  const [inputBoxId, setInputBoxId] = useState('TB-001');
+  const [availableBoxes, setAvailableBoxes] = useState(['TB-001', 'TB-DEMO-01', 'TB-TEST']);
   const [isConnected, setIsConnected] = useState(false);
+  const [backendError, setBackendError] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+
   const [records, setRecords] = useState([]);
   const [claims, setClaims] = useState([]);
   const [payouts, setPayouts] = useState([]);
   const [latestRecord, setLatestRecord] = useState(null);
+  const [chainVerify, setChainVerify] = useState(null);
+
   const [isTamperLoading, setIsTamperLoading] = useState(false);
   const [tamperSuccessMsg, setTamperSuccessMsg] = useState(null);
+  const [selectedTamperSeq, setSelectedTamperSeq] = useState('');
   const [isQrOpen, setIsQrOpen] = useState(false);
 
-  // Fetch initial box data
-  const fetchData = async () => {
-    try {
-      const [recRes, claimRes, payRes] = await Promise.all([
-        fetch(`/api/records/${boxId}?limit=50`),
-        fetch(`/api/claims/${boxId}`),
-        fetch(`/api/payouts/${boxId}`)
-      ]);
+  // References to prevent race conditions and cross-device stale overwrites
+  const activeBoxRef = useRef(boxId);
+  const activeRequestIdRef = useRef(0);
 
-      if (recRes.ok) {
-        const recData = await recRes.json();
-        setRecords(recData);
-        if (recData.length > 0) {
-          setLatestRecord(recData[recData.length - 1]);
+  // Always keep activeBoxRef in sync with boxId
+  useEffect(() => {
+    activeBoxRef.current = boxId;
+  }, [boxId]);
+
+  // Fetch all known box IDs in system to populate selector
+  const fetchBoxes = async () => {
+    try {
+      const res = await fetch('/api/boxes');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.boxes && Array.isArray(data.boxes)) {
+          // Merge discovered boxes with defaults
+          setAvailableBoxes((prev) => {
+            const combined = Array.from(new Set([...data.boxes, ...prev, 'TB-001', 'TB-DEMO-01', 'TB-TEST']));
+            return combined;
+          });
         }
       }
-      if (claimRes.ok) {
-        const claimData = await claimRes.json();
-        setClaims(claimData);
-      }
-      if (payRes.ok) {
-        const payData = await payRes.json();
-        setPayouts(payData);
-      }
-    } catch (err) {
-      console.error('Error fetching initial data:', err);
+    } catch {
+      // Backend may be starting
     }
   };
 
-  useEffect(() => {
-    fetchData();
+  // Dedicated device change handler
+  const handleDeviceChange = (newId) => {
+    const cleanId = String(newId || '').trim();
+    if (!cleanId) return;
 
-    // Setup Socket.io connection
+    // Immediately update input and active box
+    setInputBoxId(cleanId);
+    setBoxId(cleanId);
+    activeBoxRef.current = cleanId;
+
+    // Clear stale state for previous device
+    setTamperSuccessMsg(null);
+    setBackendError(null);
+    setIsLoading(true);
+    setRecords([]);
+    setClaims([]);
+    setPayouts([]);
+    setLatestRecord(null);
+    setChainVerify(null);
+  };
+
+  // Form submit handler for custom box ID input
+  const handleBoxSubmit = (e) => {
+    e.preventDefault();
+    if (inputBoxId.trim()) {
+      handleDeviceChange(inputBoxId.trim());
+    }
+  };
+
+  // Fetch box data and chain integrity with race-condition protection
+  const fetchData = useCallback(async (targetId) => {
+    const targetBox = (targetId || activeBoxRef.current).trim();
+    if (!targetBox) return;
+
+    const requestId = ++activeRequestIdRef.current;
+    setIsLoading(true);
+    setBackendError(null);
+
+    try {
+      const [recRes, claimRes, payRes, verifyRes] = await Promise.all([
+        fetch(`/api/records/${encodeURIComponent(targetBox)}?limit=200`),
+        fetch(`/api/claims/${encodeURIComponent(targetBox)}`),
+        fetch(`/api/payouts/${encodeURIComponent(targetBox)}`),
+        fetch(`/api/verify/${encodeURIComponent(targetBox)}`)
+      ]);
+
+      // If another request started while this was in-flight, discard this response
+      if (requestId !== activeRequestIdRef.current || targetBox !== activeBoxRef.current) {
+        return;
+      }
+
+      let parsedRecords = [];
+      let parsedClaims = [];
+      let parsedPayouts = [];
+      let parsedVerify = null;
+
+      if (recRes.ok) {
+        const rawRec = await recRes.json();
+        if (Array.isArray(rawRec)) {
+          parsedRecords = rawRec;
+        }
+      } else {
+        setBackendError(`Backend returned HTTP ${recRes.status} for records.`);
+      }
+
+      if (claimRes.ok) {
+        const rawClaims = await claimRes.json();
+        if (Array.isArray(rawClaims)) parsedClaims = rawClaims;
+      }
+
+      if (payRes.ok) {
+        const rawPayouts = await payRes.json();
+        if (Array.isArray(rawPayouts)) parsedPayouts = rawPayouts;
+      }
+
+      if (verifyRes.ok) {
+        parsedVerify = await verifyRes.json();
+      }
+
+      // Check once more after async json() deserialization
+      if (requestId !== activeRequestIdRef.current || targetBox !== activeBoxRef.current) {
+        return;
+      }
+
+      // Atomically commit state for this device
+      setRecords(parsedRecords);
+      setClaims(parsedClaims);
+      setPayouts(parsedPayouts);
+      setChainVerify(parsedVerify);
+
+      if (parsedRecords.length > 0) {
+        // Records are in ascending seq order; last element is latest
+        const latest = parsedRecords[parsedRecords.length - 1];
+        setLatestRecord(latest);
+        const midIndex = Math.floor(parsedRecords.length / 2);
+        setSelectedTamperSeq(String(parsedRecords[midIndex].seq));
+      } else {
+        setLatestRecord(null);
+        setSelectedTamperSeq('');
+      }
+    } catch (err) {
+      if (requestId === activeRequestIdRef.current && targetBox === activeBoxRef.current) {
+        console.error('Error fetching data from backend:', err);
+        setBackendError('Cannot connect to backend server on port 4000. Ensure backend is running.');
+      }
+    } finally {
+      if (requestId === activeRequestIdRef.current && targetBox === activeBoxRef.current) {
+        setIsLoading(false);
+      }
+    }
+  }, []);
+
+  // Fetch available boxes on initial mount
+  useEffect(() => {
+    fetchBoxes();
+  }, []);
+
+  // Main data sync & Socket.io setup when active boxId changes
+  useEffect(() => {
+    fetchData(boxId);
+
+    // Setup Socket.io connection for real-time live feed
     const socket = io();
 
     socket.on('connect', () => {
-      console.log('Socket connected');
       setIsConnected(true);
+      setBackendError(null);
     });
 
     socket.on('disconnect', () => {
-      console.log('Socket disconnected');
       setIsConnected(false);
     });
 
     socket.on('record', (newRecord) => {
-      if (newRecord.box_id === boxId) {
+      if (newRecord.box_id === activeBoxRef.current) {
         setLatestRecord(newRecord);
         setRecords((prev) => {
-          // Avoid duplicates
           if (prev.some(r => r.seq === newRecord.seq)) return prev;
           const updated = [...prev, newRecord];
-          return updated.slice(-60); // keep last 60 records for smooth chart
+          return updated.slice(-100);
         });
+        // Re-verify chain tip on incoming record
+        fetch(`/api/verify/${encodeURIComponent(activeBoxRef.current)}`)
+          .then(r => r.json())
+          .then(v => {
+            if (activeBoxRef.current === newRecord.box_id) {
+              setChainVerify(v);
+            }
+          })
+          .catch(() => {});
       }
     });
 
     socket.on('claim', (newClaim) => {
-      if (newClaim.box_id === boxId) {
+      if (newClaim.box_id === activeBoxRef.current) {
         setClaims((prev) => [newClaim, ...prev]);
       }
     });
 
     socket.on('payout', (newPayout) => {
-      if (newPayout.box_id === boxId) {
+      if (newPayout.box_id === activeBoxRef.current) {
         setPayouts((prev) => [newPayout, ...prev]);
       }
     });
 
     socket.on('tamper', (info) => {
-      if (info.box_id === boxId) {
-        fetchData();
+      if (info.box_id === activeBoxRef.current) {
+        fetchData(activeBoxRef.current);
       }
     });
 
     socket.on('reset', (info) => {
-      if (info.box_id === boxId) {
+      if (info.box_id === activeBoxRef.current) {
         setRecords([]);
         setClaims([]);
         setPayouts([]);
         setLatestRecord(null);
         setTamperSuccessMsg(null);
+        setChainVerify({ ok: true, empty: true, count: 0 });
       }
     });
 
     return () => {
       socket.disconnect();
     };
-  }, [boxId]);
+  }, [boxId, fetchData]);
 
   // Handle Admin Tamper action
   const handleTamper = async () => {
     if (records.length === 0) {
-      alert('No records stored yet. Run the publisher first!');
+      alert('No records stored yet for this box. Run fake-publisher.js first.');
       return;
     }
-    // Pick an existing record to tamper with (mid-chain or latest)
-    const targetSeq = Math.floor(records.length / 2);
-    const seqToTamper = records[targetSeq]?.seq || records[0].seq;
+    const seqNum = selectedTamperSeq !== '' ? parseInt(selectedTamperSeq, 10) : records[0].seq;
+    if (isNaN(seqNum)) {
+      alert('Please enter a valid sequence number to tamper.');
+      return;
+    }
+
+    if (!confirm(`Demonstrate Tamper Detection?\nThis will mutate record #${seqNum} of ${boxId} in the database without re-signing it.\nThe verification engine should immediately detect the altered hash.`)) {
+      return;
+    }
 
     setIsTamperLoading(true);
     try {
-      const res = await fetch(`/api/admin/tamper/${boxId}/${seqToTamper}`, {
+      const res = await fetch(`/api/admin/tamper/${encodeURIComponent(boxId)}/${seqNum}`, {
         method: 'POST'
       });
       const data = await res.json();
       if (res.ok) {
-        setTamperSuccessMsg(`Record #${seqToTamper} maliciously modified! Check Verify page.`);
-        fetchData();
+        setTamperSuccessMsg(`Record #${seqNum} of ${boxId} was modified in database! Verification will now flag this record.`);
+        fetchData(boxId);
       } else {
         alert(data.error || 'Failed to tamper record');
       }
@@ -164,20 +305,39 @@ export default function Dashboard() {
 
   // Handle Admin Reset action
   const handleReset = async () => {
-    if (!confirm(`Reset all telemetry, claims, and payouts for ${boxId}?`)) return;
+    if (!confirm(`Reset all telemetry records, claims, and payouts for ${boxId}?\n(This will clear the chain for this box)`)) return;
     try {
-      await fetch(`/api/admin/reset/${boxId}`, { method: 'POST' });
-      setRecords([]);
-      setClaims([]);
-      setPayouts([]);
-      setLatestRecord(null);
-      setTamperSuccessMsg(null);
+      const res = await fetch(`/api/admin/reset/${encodeURIComponent(boxId)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: true })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setRecords([]);
+        setClaims([]);
+        setPayouts([]);
+        setLatestRecord(null);
+        setTamperSuccessMsg(null);
+        setChainVerify({ ok: true, empty: true, count: 0 });
+        fetchBoxes();
+      } else {
+        alert(data.error || 'Failed to reset box');
+      }
     } catch (e) {
       console.error(e);
+      alert('Network error while resetting box.');
     }
   };
 
-  // Determine overall status
+  // Authoritative record count from verification engine or records array
+  const totalCount = (chainVerify?.count !== undefined && chainVerify?.count !== null)
+    ? chainVerify.count
+    : records.length;
+
+  // Determine overall status flags
+  const isTampered = chainVerify && chainVerify.ok === false;
+  const isEmpty = !isLoading && totalCount === 0 && !isTampered;
   const hasBreach = claims.length > 0 || (latestRecord && (latestRecord.temp_c > 8.0 || latestRecord.shock === 1));
 
   // Chart data formatting
@@ -193,6 +353,22 @@ export default function Dashboard() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+      {/* Backend Offline Warning Banner */}
+      {backendError && (
+        <div className="p-3.5 rounded-xl bg-rose-950/90 border border-rose-500/70 text-rose-200 text-xs flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+            <span className="font-semibold">{backendError}</span>
+          </div>
+          <button 
+            onClick={() => fetchData(boxId)} 
+            className="px-2.5 py-1 rounded bg-rose-800 hover:bg-rose-700 text-white font-bold transition"
+          >
+            Retry Connection
+          </button>
+        </div>
+      )}
+
       {/* Top Header Bar */}
       <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-800">
         <div className="flex items-center gap-3">
@@ -207,23 +383,67 @@ export default function Dashboard() {
                   ? 'bg-emerald-950/80 text-emerald-400 border-emerald-500/40' 
                   : 'bg-rose-950/80 text-rose-400 border-rose-500/40'
               }`}>
-                {isConnected ? 'LIVE FEED' : 'RECONNECTING'}
+                {isConnected ? 'LIVE FEED' : 'OFFLINE / RECONNECTING'}
               </span>
             </div>
-            <p className="text-xs text-slate-400">Cryptographically Hash-Chained Parcel Custody Tracker</p>
+            <p className="text-xs text-slate-400">Cryptographically Hash-Chained Parcel Custody Tracker &middot; SHA-256 + HMAC</p>
           </div>
         </div>
 
         {/* Box Selector & Action Buttons */}
-        <div className="flex items-center gap-2.5">
-          <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs">
-            <span className="text-slate-400">Box ID:</span>
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* Quick Dropdown Selector for All Available Devices */}
+          <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs shadow-inner">
+            <span className="text-slate-400 font-medium">Device:</span>
+            <select
+              value={availableBoxes.includes(boxId) ? boxId : ''}
+              onChange={(e) => {
+                if (e.target.value) handleDeviceChange(e.target.value);
+              }}
+              className="bg-slate-950 text-emerald-400 font-mono font-bold px-2 py-0.5 rounded border border-slate-800 focus:outline-none focus:border-emerald-500 cursor-pointer"
+            >
+              {availableBoxes.map((id) => (
+                <option key={id} value={id}>{id}</option>
+              ))}
+              {!availableBoxes.includes(boxId) && (
+                <option value={boxId}>{boxId} (Custom)</option>
+              )}
+            </select>
+          </div>
+
+          {/* Custom Box ID Input Form */}
+          <form onSubmit={handleBoxSubmit} className="flex items-center gap-1.5 bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs shadow-inner focus-within:border-emerald-500 focus-within:ring-1 focus-within:ring-emerald-500/50 transition">
             <input 
               type="text" 
-              value={boxId} 
-              onChange={(e) => setBoxId(e.target.value.trim())}
-              className="bg-transparent text-white font-mono font-bold w-16 focus:outline-none"
+              value={inputBoxId} 
+              onChange={(e) => setInputBoxId(e.target.value)}
+              placeholder="Custom Box ID"
+              className="bg-slate-950 text-white font-mono font-bold w-24 sm:w-28 px-2 py-0.5 rounded border border-slate-800 focus:outline-none focus:border-emerald-500"
             />
+            <button
+              type="submit"
+              className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] transition"
+            >
+              Load
+            </button>
+          </form>
+
+          {/* Quick device chips */}
+          <div className="hidden sm:flex items-center gap-1 text-[11px]">
+            {availableBoxes.slice(0, 4).map((b) => (
+              <button
+                key={b}
+                type="button"
+                onClick={() => handleDeviceChange(b)}
+                className={`px-2 py-1 rounded-lg font-mono transition ${
+                  b === boxId 
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold shadow-sm' 
+                    : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+                }`}
+              >
+                {b}
+              </button>
+            ))}
           </div>
 
           <button
@@ -235,7 +455,7 @@ export default function Dashboard() {
           </button>
 
           <Link
-            to={`/verify/${boxId}`}
+            to={`/verify/${encodeURIComponent(boxId)}`}
             className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-lg shadow-emerald-900/30 transition"
           >
             <ShieldCheck className="w-4 h-4" />
@@ -246,36 +466,112 @@ export default function Dashboard() {
       </div>
 
       {/* Main Status Banner */}
-      <div className={`p-4 sm:p-5 rounded-2xl border transition-all duration-300 flex flex-wrap items-center justify-between gap-4 ${
-        hasBreach ? 'glass-panel-danger glow-red' : 'glass-panel-success glow-green'
-      }`}>
-        <div className="flex items-center gap-3.5">
-          <div className={`p-3 rounded-2xl ${hasBreach ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
-            {hasBreach ? <ShieldAlert className="w-8 h-8" /> : <ShieldCheck className="w-8 h-8" />}
-          </div>
-          <div>
-            <div className="text-xs uppercase font-extrabold tracking-wider text-slate-400">Box Custody Health</div>
-            <div className={`text-xl sm:text-2xl font-black ${hasBreach ? 'text-rose-400' : 'text-emerald-400'}`}>
-              {hasBreach ? 'BREACH DETECTED — CLAIM TRIGGERED' : 'SAFE COLD CHAIN — ALL PARAMETERS INTACT'}
+      {isLoading ? (
+        /* Loading Skeletons State */
+        <div className="p-4 sm:p-5 rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur-md flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5">
+            <div className="p-3 rounded-2xl bg-slate-800 text-slate-400 border border-slate-700 animate-spin">
+              <RefreshCw className="w-8 h-8 text-emerald-400" />
             </div>
-            <div className="text-xs text-slate-300 mt-0.5">
-              {latestRecord ? (
-                <span>Last verified record <span className="mono font-bold text-white">#{latestRecord.seq}</span> at {new Date(latestRecord.ts * 1000).toLocaleTimeString()}</span>
-              ) : (
-                'Waiting for incoming records...'
-              )}
+            <div>
+              <div className="text-xs uppercase font-extrabold tracking-wider text-slate-400">Ledger Synchronization</div>
+              <div className="text-xl sm:text-2xl font-black text-slate-200">
+                SYNCING TELEMETRY LEDGER FOR {boxId}...
+              </div>
+              <div className="text-xs text-slate-400 mt-0.5">
+                Verifying cryptographic hash chain and retrieving signed telemetry records...
+              </div>
+            </div>
+          </div>
+          <div className="bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-2 text-right">
+            <div className="text-[11px] uppercase text-slate-400 font-semibold">Chained Records</div>
+            <div className="text-2xl font-black text-slate-500 mono">--</div>
+          </div>
+        </div>
+      ) : isTampered ? (
+        /* Tampered State Banner */
+        <div className="p-4 sm:p-5 rounded-2xl border border-rose-500/80 bg-rose-950/40 glow-red backdrop-blur-md flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5">
+            <div className="p-3 rounded-2xl bg-rose-500/20 text-rose-400 border border-rose-500/40 animate-pulse">
+              <ShieldAlert className="w-8 h-8" />
+            </div>
+            <div>
+              <div className="text-xs uppercase font-extrabold tracking-wider text-rose-300">Cryptographic Integrity Alert</div>
+              <div className="text-xl sm:text-2xl font-black text-rose-400">
+                TAMPER DETECTED AT SEQ #{chainVerify?.brokenAt ?? '?'}
+              </div>
+              <div className="text-xs text-rose-200 mt-0.5">
+                {chainVerify?.reason || 'Record hash mismatch detected in database ledger. Tampering identified.'}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <Link 
+              to={`/verify/${encodeURIComponent(boxId)}`}
+              className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-lg transition"
+            >
+              Inspect Forensic Report &rarr;
+            </Link>
+            <div className="bg-slate-900/80 border border-slate-800 rounded-xl px-4 py-2 text-right">
+              <div className="text-[11px] uppercase text-slate-400 font-semibold">Chained Records</div>
+              <div className="text-2xl font-black text-rose-400 mono">{totalCount}</div>
             </div>
           </div>
         </div>
+      ) : isEmpty ? (
+        /* Honest Empty State Banner */
+        <div className="p-4 sm:p-5 rounded-2xl border border-slate-700 bg-slate-900/80 backdrop-blur-md flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5">
+            <div className="p-3 rounded-2xl bg-slate-800 text-slate-400 border border-slate-700">
+              <Inbox className="w-8 h-8" />
+            </div>
+            <div>
+              <div className="text-xs uppercase font-extrabold tracking-wider text-slate-400">Device Ledger Status</div>
+              <div className="text-xl sm:text-2xl font-black text-slate-200">
+                NO TELEMETRY RECORDED YET
+              </div>
+              <div className="text-xs text-slate-400 mt-0.5">
+                Chain anchor is at genesis block <span className="mono text-white">#0</span>. Transmit records using <span className="mono text-emerald-400 font-semibold">fake-publisher.js</span> or physical ESP32 box.
+              </div>
+            </div>
+          </div>
+          <div className="bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-2 text-right">
+            <div className="text-[11px] uppercase text-slate-400 font-semibold">Chained Records</div>
+            <div className="text-2xl font-black text-slate-500 mono">0</div>
+          </div>
+        </div>
+      ) : (
+        /* Safe / Breach Banner */
+        <div className={`p-4 sm:p-5 rounded-2xl border transition-all duration-300 flex flex-wrap items-center justify-between gap-4 ${
+          hasBreach ? 'glass-panel-danger glow-red' : 'glass-panel-success glow-green'
+        }`}>
+          <div className="flex items-center gap-3.5">
+            <div className={`p-3 rounded-2xl ${hasBreach ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
+              {hasBreach ? <ShieldAlert className="w-8 h-8" /> : <ShieldCheck className="w-8 h-8" />}
+            </div>
+            <div>
+              <div className="text-xs uppercase font-extrabold tracking-wider text-slate-400">Box Custody Health</div>
+              <div className={`text-xl sm:text-2xl font-black ${hasBreach ? 'text-rose-400' : 'text-emerald-400'}`}>
+                {hasBreach ? 'BREACH DETECTED — CLAIM TRIGGERED' : 'SAFE COLD CHAIN — ALL PARAMETERS INTACT'}
+              </div>
+              <div className="text-xs text-slate-300 mt-0.5">
+                {latestRecord ? (
+                  <span>Last verified record <span className="mono font-bold text-white">#{latestRecord.seq}</span> at {new Date(latestRecord.ts * 1000).toLocaleTimeString()}</span>
+                ) : (
+                  'Waiting for incoming records...'
+                )}
+              </div>
+            </div>
+          </div>
 
-        {/* Live Sequence Counter */}
-        <div className="bg-slate-900/80 border border-slate-800 rounded-xl px-4 py-2 text-right">
-          <div className="text-[11px] uppercase text-slate-400 font-semibold">Chained Records</div>
-          <div className="text-2xl font-black text-white mono">
-            {records.length}
+          <div className="bg-slate-900/80 border border-slate-800 rounded-xl px-4 py-2 text-right">
+            <div className="text-[11px] uppercase text-slate-400 font-semibold">Chained Records</div>
+            <div className="text-2xl font-black text-white mono">
+              {totalCount}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Payout & Claim Card if Triggered */}
       {activePayout && (
@@ -331,11 +627,11 @@ export default function Dashboard() {
             <span className={`text-xl sm:text-2xl font-bold ${
               latestRecord?.shock === 1 ? 'text-rose-400' : 'text-slate-200'
             }`}>
-              {latestRecord?.shock === 1 ? 'DROP DETECTED' : 'NORMAL (0g)'}
+              {latestRecord ? (latestRecord.shock === 1 ? 'DROP DETECTED' : 'NORMAL (0g)') : '--'}
             </span>
           </div>
           <div className="text-[11px] text-slate-400 mt-1">
-            Orientation: {latestRecord?.flipped === 1 ? 'FLIPPED' : latestRecord?.tilt === 1 ? 'TILTED' : 'UPRIGHT'}
+            Orientation: {latestRecord ? (latestRecord.flipped === 1 ? 'FLIPPED' : latestRecord.tilt === 1 ? 'TILTED' : 'UPRIGHT') : '--'}
           </div>
         </div>
 
@@ -349,13 +645,13 @@ export default function Dashboard() {
           </div>
           <div className="flex items-baseline gap-1.5">
             <span className={`text-xl sm:text-2xl font-bold ${
-              latestRecord?.lid_open === 1 ? 'text-amber-400' : 'text-emerald-400'
+              latestRecord ? (latestRecord.lid_open === 1 ? 'LID OPEN' : 'SEALED & LOCKED') : '--'
             }`}>
-              {latestRecord?.lid_open === 1 ? 'LID OPEN' : 'SEALED & LOCKED'}
+              {latestRecord ? (latestRecord.lid_open === 1 ? 'LID OPEN' : 'SEALED & LOCKED') : '--'}
             </span>
           </div>
           <div className="text-[11px] text-slate-400 mt-1">
-            Light reading: {latestRecord?.light ?? '--'} lux
+            Light reading: {latestRecord?.light !== undefined ? `${latestRecord.light} lux` : '--'}
           </div>
         </div>
       </div>
@@ -370,11 +666,11 @@ export default function Dashboard() {
                 <Thermometer className="w-4 h-4 text-emerald-400" />
                 Live Temperature Stream (°C)
               </h2>
-              <p className="text-xs text-slate-400">Target storage: 2.0°C – 8.0°C (Vaccine / Cold Chain)</p>
+              <p className="text-xs text-slate-400">Target cold-chain range: 2.0°C – 8.0°C &middot; Breach threshold: &gt;8.0°C</p>
             </div>
             <div className="flex items-center gap-3 text-xs">
               <span className="flex items-center gap-1.5 text-slate-300">
-                <span className="w-3 h-0.5 bg-emerald-400 inline-block"></span> Temp
+                <span className="w-3 h-0.5 bg-emerald-400 inline-block"></span> Sensor Temp
               </span>
               <span className="flex items-center gap-1.5 text-rose-400">
                 <span className="w-3 h-0.5 bg-rose-500 inline-block"></span> 8.0°C Breach Limit
@@ -384,8 +680,9 @@ export default function Dashboard() {
 
           <div className="w-full h-64">
             {chartData.length === 0 ? (
-              <div className="w-full h-full flex items-center justify-center text-slate-500 text-xs">
-                No telemetry data yet. Run fake-publisher.js or connect ESP32.
+              <div className="w-full h-full flex flex-col items-center justify-center text-slate-500 text-xs">
+                <Inbox className="w-8 h-8 mb-2 opacity-50" />
+                <span>No telemetry data yet. Run fake-publisher.js or connect ESP32.</span>
               </div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
@@ -459,23 +756,37 @@ export default function Dashboard() {
               <h3 className="text-base font-bold text-white">Live Cryptographic Tamper Simulation</h3>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
-              Simulate an adversary modifying a stored telemetry record in the database without valid private key.
+              Simulate an adversary modifying a stored telemetry record in database storage without possessing the shared secret DEVICE_KEY.
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* Target record selector */}
+            <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs">
+              <span className="text-slate-400">Target Seq:</span>
+              <input
+                type="number"
+                min="0"
+                value={selectedTamperSeq}
+                onChange={(e) => setSelectedTamperSeq(e.target.value)}
+                placeholder={records.length > 0 ? String(records[0].seq) : '#'}
+                disabled={records.length === 0}
+                className="bg-slate-950 text-white font-mono w-14 px-1.5 py-0.5 rounded border border-slate-800 text-center focus:outline-none focus:border-rose-500"
+              />
+            </div>
+
             <button
               onClick={handleTamper}
               disabled={isTamperLoading || records.length === 0}
-              className="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white text-xs font-bold shadow-lg shadow-rose-900/40 flex items-center gap-2 transition"
+              className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-40 text-white text-xs font-bold shadow-lg shadow-rose-900/40 flex items-center gap-2 transition"
             >
               <AlertTriangle className="w-4 h-4" />
-              <span>{isTamperLoading ? 'Tampering...' : 'Tamper A Record'}</span>
+              <span>{isTamperLoading ? 'Tampering...' : `Tamper Record #${selectedTamperSeq || '0'}`}</span>
             </button>
 
             <button
               onClick={handleReset}
-              className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700 flex items-center gap-1.5 transition"
+              className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700 flex items-center gap-1.5 transition"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               <span>Reset State</span>
@@ -490,7 +801,7 @@ export default function Dashboard() {
               <span>{tamperSuccessMsg}</span>
             </div>
             <Link 
-              to={`/verify/${boxId}`} 
+              to={`/verify/${encodeURIComponent(boxId)}`} 
               className="underline font-bold text-white hover:text-rose-300 flex items-center gap-1"
             >
               <span>View Verify Page Now</span>
@@ -557,28 +868,28 @@ export default function Dashboard() {
               <ShieldCheck className="w-4 h-4 text-emerald-400" />
               Cryptographic Chain Tip
             </h2>
-            <span className="text-xs text-slate-400">HMAC-SHA256</span>
+            <span className="text-xs text-slate-400">HMAC-SHA256 (Shared Secret)</span>
           </div>
 
           <div className="space-y-3 text-xs">
             <div>
               <span className="text-slate-400 block mb-1">Latest SHA-256 Block Hash</span>
               <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 mono text-emerald-400 break-all select-all">
-                {latestRecord?.hash || '0000000000000000000000000000000000000000000000000000000000000000'}
+                {latestRecord?.hash || '0000000000000000000000000000000000000000000000000000000000000000 (Genesis Anchor)'}
               </div>
             </div>
 
             <div>
               <span className="text-slate-400 block mb-1">Previous Chained Hash (prev_hash)</span>
               <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 mono text-slate-400 break-all select-all">
-                {latestRecord?.prev_hash || '0000000000000000000000000000000000000000000000000000000000000000'}
+                {latestRecord?.prev_hash || '0000000000000000000000000000000000000000000000000000000000000000 (Genesis Anchor)'}
               </div>
             </div>
 
             <div>
               <span className="text-slate-400 block mb-1">Device HMAC Signature (sig)</span>
               <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 mono text-purple-400 break-all select-all">
-                {latestRecord?.sig || 'Awaiting first signed payload...'}
+                {latestRecord?.sig || 'Awaiting initial signed record...'}
               </div>
             </div>
           </div>
@@ -594,4 +905,3 @@ export default function Dashboard() {
     </div>
   );
 }
-
