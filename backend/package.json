@@ -1,0 +1,22 @@
+{
+  "name": "trustbox-backend",
+  "version": "1.0.0",
+  "description": "TrustBox backend server: MQTT subscriber, cryptographic hash chain verifier, insurance engine & WebSockets",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "simulate": "node fake-publisher.js",
+    "simulate:heat": "node fake-publisher.js --heat",
+    "simulate:drop": "node fake-publisher.js --drop"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "mongoose": "^8.8.4",
+    "mqtt": "^5.10.3",
+    "socket.io": "^4.8.1"
+  }
+}
+
