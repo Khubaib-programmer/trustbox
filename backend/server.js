@@ -33,6 +33,9 @@ const MQTT_PASS = process.env.MQTT_PASS;
 const DEVICE_KEY = process.env.DEVICE_KEY || 'trustbox-super-secret-key-32ch';
 const CLAIM_TEMP_C = parseFloat(process.env.CLAIM_TEMP_C) || 8.0;
 const CLAIM_WINDOW_SEC = parseInt(process.env.CLAIM_WINDOW_SEC, 10) || 15;
+// IoT raw topic — the exact topic your hardware publishes to
+// e.g. "box-001/telemetry" or "trustbox/raw" or "#" (wildcard all)
+const IOT_MQTT_TOPIC = process.env.IOT_MQTT_TOPIC || 'trustbox/raw/#';
 
 // In-memory fallback if MongoDB is offline during hackathon demo
 let isMongoConnected = false;
@@ -79,6 +82,98 @@ async function getLatestBoxRecord(boxId) {
     const list = inMemoryRecords.get(boxId) || [];
     return list.length > 0 ? list[list.length - 1] : null;
   }
+}
+
+/**
+ * Maps raw IoT device payload → TrustBox internal schema.
+ * Handles field renames, boolean→int coercion, sensor selection,
+ * and event string derivation.
+ *
+ * IoT device fields:
+ *   device_id, uptime_ms, temperature_dht_c, humidity_pct,
+ *   temperature_ds18b20_c, photo_raw, light_inside, shock, tilt,
+ *   ball_switch, reed_triggered, delivery_button, breach
+ */
+function adaptIoTPayload(raw) {
+  // Prefer DS18B20 (more accurate probe) if present and valid, else fall back to DHT
+  const temp_c = (raw.temperature_ds18b20_c != null && !isNaN(raw.temperature_ds18b20_c))
+    ? parseFloat(Number(raw.temperature_ds18b20_c).toFixed(1))
+    : parseFloat(Number(raw.temperature_dht_c).toFixed(1));
+
+  const humidity = parseFloat(Number(raw.humidity_pct).toFixed(1));
+
+  // Booleans → 0/1
+  const b = (v) => (v === true || v === 1 || v === '1') ? 1 : 0;
+
+  const shock     = b(raw.shock);
+  const tilt      = b(raw.tilt) || b(raw.ball_switch);   // ball_switch = tilt sensor
+  const flipped   = b(raw.tilt) && b(raw.ball_switch) ? 1 : 0; // both active = flipped
+  const lid_open  = b(raw.reed_triggered);               // reed switch = magnetic lid sensor
+  const light     = parseInt(raw.photo_raw, 10) || 0;   // raw lux/ADC reading
+
+  // Derive event string from breach flags
+  let event = 'NONE';
+  if (raw.breach === true || raw.breach === 1) {
+    if (temp_c > CLAIM_TEMP_C)       event = 'TEMP_BREACH';
+    else if (shock)                   event = 'DROP';
+    else if (flipped)                 event = 'FLIPPED';
+    else if (lid_open)                event = 'LID_OPEN';
+    else                              event = 'TEMP_BREACH'; // fallback
+  } else if (shock)   event = 'DROP';
+  else if (flipped)   event = 'FLIPPED';
+  else if (lid_open)  event = 'LID_OPEN';
+
+  return {
+    box_id:   String(raw.device_id || 'box-001').trim(),
+    ts:       Math.floor(Date.now() / 1000),   // server timestamp (seconds)
+    temp_c,
+    humidity,
+    shock,
+    tilt,
+    flipped,
+    light,
+    lid_open,
+    event,
+    // seq, prev_hash, hash, sig are computed server-side in ingestIoTRecord()
+  };
+}
+
+/**
+ * Server-side chain computation + ingestion for raw IoT payloads.
+ * The IoT device does NOT send seq/hash/sig — the backend computes them.
+ */
+const { signRecord, buildCanonicalString, computeHash, computeSignature } = require('./chain');
+
+async function ingestIoTRecord(rawIoT, source = 'IOT-MQTT') {
+  let adapted;
+  try {
+    adapted = adaptIoTPayload(rawIoT);
+  } catch (e) {
+    console.error(`[IOT ADAPT ERROR] Failed mapping IoT payload: ${e.message}`);
+    return { success: false, error: e.message };
+  }
+
+  const boxId = adapted.box_id;
+
+  // Get latest chain state to determine next seq + prev_hash
+  const latest = await getLatestBoxRecord(boxId);
+  const seq       = latest ? latest.seq + 1 : 0;
+  const prev_hash = latest ? latest.hash : GENESIS_PREV_HASH;
+
+  // Assemble full record
+  const rawRecord = { ...adapted, seq, prev_hash };
+
+  // Compute hash + HMAC signature server-side
+  const signed = signRecord(rawRecord, DEVICE_KEY);
+
+  // Pass through the normal ingestion pipeline
+  const result = await handleIncomingRecord(signed, source);
+  if (result.success) {
+    console.log(`[IOT ${source}] ${boxId} #${seq} | Temp: ${signed.temp_c}°C | Event: ${signed.event}`);
+  } else {
+    console.warn(`[IOT INGEST FAILED] ${boxId} #${seq}: ${result.error}`);
+  }
+  return result;
 }
 
 /**
@@ -237,19 +332,36 @@ if (MQTT_URL) {
   });
 
   mqttClient.on('connect', () => {
-    console.log(' Connected to HiveMQ / MQTT Broker!');
+    console.log('✅ Connected to HiveMQ / MQTT Broker!');
+
+    // --- TrustBox internal signed records (fake-publisher / another TrustBox node) ---
     mqttClient.subscribe('trustbox/+/telemetry', (err) => {
-      if (!err) console.log(' Subscribed to trustbox/+/telemetry');
+      if (!err) console.log('✅ Subscribed to trustbox/+/telemetry  (signed TrustBox records)');
     });
     mqttClient.subscribe('trustbox/+/event', (err) => {
-      if (!err) console.log(' Subscribed to trustbox/+/event');
+      if (!err) console.log('✅ Subscribed to trustbox/+/event  (signed TrustBox records)');
+    });
+
+    // --- Raw IoT device topic (hardware team payload, no hash/sig) ---
+    mqttClient.subscribe(IOT_MQTT_TOPIC, (err) => {
+      if (!err) console.log(`✅ Subscribed to ${IOT_MQTT_TOPIC}  (raw IoT hardware payloads)`);
     });
   });
 
   mqttClient.on('message', async (topic, message) => {
     try {
       const payload = JSON.parse(message.toString());
-      await handleIncomingRecord(payload, 'MQTT');
+
+      // Route: raw IoT payload has device_id but no hash/sig/seq
+      const isRawIoT = payload.device_id !== undefined && payload.hash === undefined;
+
+      if (isRawIoT) {
+        // Adapt + compute chain server-side, then ingest
+        await ingestIoTRecord(payload, 'IOT-MQTT');
+      } else {
+        // Already a signed TrustBox record — validate and ingest directly
+        await handleIncomingRecord(payload, 'MQTT');
+      }
     } catch (e) {
       console.error(`[MQTT ERROR] Failed parsing message on ${topic}:`, e.message);
     }
@@ -488,6 +600,27 @@ app.post('/api/admin/reset/:boxId', async (req, res) => {
     console.log(`[RESET] State reset for box ${boxId}`);
     io.emit('reset', { box_id: boxId });
     res.json({ success: true, message: `Reset completed for ${boxId}` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// =========================================================
+// IoT RAW INGEST — HTTP fallback for hardware teams
+// POST /api/iot/ingest  { device_id, temperature_dht_c, ... }
+// =========================================================
+app.post('/api/iot/ingest', async (req, res) => {
+  const raw = req.body;
+  if (!raw || !raw.device_id) {
+    return res.status(400).json({ error: 'Payload must include device_id.' });
+  }
+  try {
+    const result = await ingestIoTRecord(raw, 'IOT-HTTP');
+    if (result.success) {
+      res.status(201).json({ ok: true, record: result.record });
+    } else {
+      res.status(result.status || 400).json({ error: result.error });
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

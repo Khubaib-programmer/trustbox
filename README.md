@@ -1,706 +1,1175 @@
-# 📦 TrustBox — Tamper-Evident Delivery Black Box & Instant Parametric Insurance
+# 📦 TrustBox — Tamper-Evident Smart Delivery System
 
-> **Cryptographically verifiable IoT cargo monitoring, recursive SHA-256 hash chaining, HMAC-SHA256 device authentication, and automated parametric insurance settlements.**
+> **A hardware-integrated, cryptographically secured, IoT-powered delivery monitoring and parametric insurance platform.**
 
----
-
-## 📑 Table of Contents
-1. [Project Overview](#1-project-overview)
-2. [Hardware Integration: Current Status and Planned Workflow](#2-hardware-integration-current-status-and-planned-workflow)
-3. [Telemetry JSON Contract](#3-telemetry-json-contract)
-4. [Cryptographic Integrity & Hash-Chain Architecture](#4-cryptographic-integrity--hash-chain-architecture)
-5. [Backend Architecture](#5-backend-architecture)
-6. [Frontend Architecture](#6-frontend-architecture)
-7. [Parametric Insurance Engine](#7-parametric-insurance-engine)
-8. [REST API & WebSocket Documentation](#8-rest-api--websocket-documentation)
-9. [Local Development & Setup Guide](#9-local-development--setup-guide)
-10. [Hardware Telemetry Simulator (`fake-publisher.js`)](#10-hardware-telemetry-simulator-fake-publisherjs)
-11. [Planned MQTT Integration](#11-planned-mqtt-integration)
-12. [Information Required from the Hardware Team](#12-information-required-from-the-hardware-team)
-13. [Testing & Verification](#13-testing--verification)
-14. [Demo Devices & Demonstration Workflow](#14-demo-devices--demonstration-workflow)
-15. [Security Model, Limitations & Production Readiness](#15-security-model-limitations--production-readiness)
-16. [Project Roadmap](#16-project-roadmap)
+TrustBox monitors the physical condition of a delivery box in real-time using an ESP32 microcontroller, publishes tamper-proof cryptographic telemetry over MQTT, verifies an unbreakable SHA-256 hash chain, and automatically approves insurance payouts the moment a cold-chain breach or drop impact is detected — all visible live on a React dashboard.
 
 ---
 
-## 1. Project Overview
+## 📋 Table of Contents
 
-**TrustBox** is an end-to-end cargo-monitoring and automated claim-settlement platform designed for high-value and cold-chain logistics (such as vaccines, biologics, premium electronics, and sensitive custody parcels). The platform continuously monitors environmental parameters and custody conditions, maintains an auditable tamper-evident cryptographic ledger, and triggers instant parametric insurance settlements when cargo conditions are breached.
+1. [System Overview](#1-system-overview)
+2. [Architecture Diagram](#2-architecture-diagram)
+3. [Complete File Structure](#3-complete-file-structure)
+4. [Technology Stack](#4-technology-stack)
+5. [How the Full Workflow Works](#5-how-the-full-workflow-works)
+6. [Cryptographic Security Model](#6-cryptographic-security-model)
+7. [Insurance Engine Logic](#7-insurance-engine-logic)
+8. [Prerequisites — Install Before Anything](#8-prerequisites--install-before-anything)
+9. [Quick Start (5 Minutes)](#9-quick-start-5-minutes)
+10. [Detailed Backend Setup](#10-detailed-backend-setup)
+11. [Detailed Frontend Setup](#11-detailed-frontend-setup)
+12. [Environment Variables Reference](#12-environment-variables-reference)
+13. [MQTT Integration Guide](#13-mqtt-integration-guide)
+14. [IoT Hardware Integration (ESP32)](#14-iot-hardware-integration-esp32)
+15. [Raw IoT Payload — New Hardware Format](#15-raw-iot-payload--new-hardware-format)
+16. [API Reference](#16-api-reference)
+17. [Socket.IO Real-Time Events](#17-socketio-real-time-events)
+18. [Telemetry Simulator (No Hardware Needed)](#18-telemetry-simulator-no-hardware-needed)
+19. [Running Tests](#19-running-tests)
+20. [Dashboard Pages Guide](#20-dashboard-pages-guide)
+21. [Database Schema](#21-database-schema)
+22. [Troubleshooting](#22-troubleshooting)
+23. [Demo Scenarios](#23-demo-scenarios)
+24. [Pushing to GitHub](#24-pushing-to-github)
 
-The project is structured into two collaborative domains:
+---
+
+## 1. System Overview
+
+TrustBox is built around three independent but tightly integrated layers:
+
+| Layer | What it does |
+|---|---|
+| **Hardware (ESP32 Firmware)** | Reads sensors, computes SHA-256 hash chain + HMAC-SHA256 signature, publishes signed telemetry over MQTT/TLS |
+| **Backend (Node.js + Express)** | Receives telemetry via MQTT or HTTP, verifies cryptographic integrity, persists to MongoDB, runs insurance engine, broadcasts via Socket.IO |
+| **Frontend (React + Vite)** | Live dashboard — real-time charts, chain verification status, custody log, claim/payout display, QR scanner, route map |
+
+### What makes it tamper-evident?
+
+Every telemetry record includes:
+- A **SHA-256 hash** computed from its own sensor data + the hash of the previous record (blockchain-style linking)
+- An **HMAC-SHA256 signature** using a device secret key
+
+If anyone modifies even a single byte of any record, the entire chain breaks. The dashboard shows this instantly.
+
+---
+
+## 2. Architecture Diagram
 
 ```
-┌────────────────────────────────────────────────────────┐
-│                   TRUSTBOX SYSTEM                      │
-├────────────────────────────┬───────────────────────────┤
-│       HARDWARE SIDE        │       SOFTWARE SIDE       │
-│  (Physical Black Box Device) │  (Cloud & Analytics Node) │
-├────────────────────────────┼───────────────────────────┤
-│ • Sensor readings          │ • HTTP Telemetry Ingestion│
-│ • Microcontroller firmware │ • Schema & Range Checks   │
-│ • JSON payload formatting  │ • Cryptographic Audit     │
-│ • Transmission to backend  │ • MongoDB Atlas Ledger    │
-│   (HTTP active, MQTT plan) │ • Parametric Claims Engine│
-│                            │ • Real-Time Web Dashboard │
-│                            │ • Mobile QR Verify Portal │
-└────────────────────────────┴───────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                         HARDWARE LAYER                              │
+│                                                                     │
+│   [DHT22/DS18B20]  [MPU-6050]  [Reed Switch]  [LDR]  [SW-420]     │
+│        │               │             │           │        │         │
+│        └───────────────┴─────────────┴───────────┘        │         │
+│                              │                            │         │
+│                        [ESP32 MCU]                                  │
+│                   SHA-256 + HMAC-SHA256                             │
+│                   Hash chain computation                            │
+│                              │                                      │
+│                     [WiFi / TLS 8883]                               │
+└──────────────────────────────│──────────────────────────────────────┘
+                               │ MQTT over TLS
+                               ▼
+                   [HiveMQ Cloud Broker]
+                               │
+┌──────────────────────────────│──────────────────────────────────────┐
+│                         BACKEND LAYER                               │
+│                                                                     │
+│              [Node.js + Express — port 4000]                        │
+│                              │                                      │
+│   ┌──────────────────────────┼────────────────────────────────┐    │
+│   │                          │                                 │    │
+│   ▼                          ▼                                 ▼    │
+│ [MQTT Subscriber]    [REST API Endpoints]    [IoT Raw Adapter]      │
+│ trustbox/+/telemetry  POST /api/records      POST /api/iot/ingest   │
+│ trustbox/+/event      GET  /api/verify/:id                          │
+│ trustbox/raw/#                                                       │
+│   │                          │                                 │    │
+│   └──────────────────────────┴────────────────────────────────┘    │
+│                              │                                      │
+│   ┌───────────────┬──────────┴──────────┬───────────────────────┐  │
+│   │               │                     │                       │  │
+│   ▼               ▼                     ▼                       ▼  │
+│ [chain.js]  [insurance.js]        [MongoDB Atlas]          [Socket.IO] │
+│ SHA-256      Auto claim +         Records / Claims          Broadcasts  │
+│ HMAC verify  Payout engine        Payouts stored            to browser  │
+└─────────────────────────────────────────────────────────────────────┘
+                               │ WebSocket
+                               ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                         FRONTEND LAYER                              │
+│                                                                     │
+│              [React + Vite — port 3000]                             │
+│                                                                     │
+│   [Dashboard.jsx]              [VerifyPage.jsx]                     │
+│   • Device selector            • QR code scanner                   │
+│   • Live temp/humidity chart   • Hash chain audit result           │
+│   • Custody event log          • Record-by-record verification      │
+│   • Claims & Payout cards      • Tamper detection banner            │
+│   • Route map (Leaflet)                                             │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-### A. Hardware Side (Under Development)
-- Developed by the hardware engineering team.
-- Responsible for the physical enclosure, power supply, sensors (temperature, humidity, impact/shock, orientation/tilt, ambient light, lid-open detection), and microcontroller firmware.
-- The physical hardware is expected to format sensor measurements into structured JSON payloads and transmit them to the software backend.
-- **Current Communication Status:** The hardware team has not finalised the hardware components, microcontroller model, or transmission protocol. While MQTT is a probable integration path, **no MQTT broker, credentials, or live hardware connections are currently operational**. Direct HTTP POST transmission is the currently implemented and functional integration mechanism.
-
-### B. Software Side (Fully Implemented)
-- Built on a **Node.js/Express** backend, **MongoDB Atlas** persistence, **Socket.IO** real-time broadcasting, and a **React 18 + Vite** dark-theme security dashboard.
-- Every ingested record is verified against an immutable recursive **SHA-256 hash chain** and an **HMAC-SHA256** device key signature.
-- An automated **Parametric Insurance Engine** evaluates cold-chain breaches (>8.0°C sustained for $\ge$15s) and shock/drop events, triggering instant simulated payouts (`pay_xxx`).
-- A responsive QR verification interface allows independent auditing via any mobile browser (`/verify/:boxId`).
-
 ---
 
-## 2. Hardware Integration: Current Status and Planned Workflow
-
-The software and hardware components interact across a defined custody lifecycle:
-
-```mermaid
-flowchart TD
-    HW["📦 Physical Hardware / Simulator<br/>(Sensors & Microcontroller)"] -->|1. Formats JSON Payload| PAYLOAD["📄 Structured Telemetry JSON"]
-    PAYLOAD -->|2. HTTP POST Ingestion (Implemented)<br/>or MQTT Publish (Planned)| BACKEND["⚙️ Node.js + Express Backend<br/>(Validation & Ingestion Pipeline)"]
-    BACKEND -->|3. Schema & Physical Range Checks| VAL{"Valid?"}
-    VAL -->|No| REJ["❌ Reject Payload (HTTP 400 / 401 / 409)"]
-    VAL -->|Yes| CRYPTO["🔒 Cryptographic Hash & HMAC Audit"]
-    CRYPTO -->|4. Store Record| DB[("🗄️ MongoDB Atlas Ledger<br/>(records collection)")]
-    CRYPTO -->|5. Real-Time Broadcast| WS["⚡ Socket.IO WebSockets"]
-    CRYPTO -->|6. Condition Evaluation| INS["🛡️ Parametric Insurance Engine"]
-    INS -->|Breach Detected| CLAIM["💰 Auto-Approved Claim & Payout"]
-    WS -->|7. Live Telemetry & Events| DASH["💻 React + Vite Dashboard"]
-    DB -->|8. Independent Verification| QR["📱 Mobile QR Audit Page (/verify/:boxId)"]
-```
-
-### Current Status Table
-
-| Component | Status | Notes |
-| :--- | :--- | :--- |
-| **Backend HTTP Ingestion** | **Implemented** | `POST /api/records` validates schema, range, signatures, and sequence continuity. |
-| **JSON Telemetry Format** | **Defined** | Formal schema defined and enforced in backend validator. |
-| **Fake Telemetry Publisher** | **Implemented** | Node.js emulator (`fake-publisher.js`) simulates journeys and breach scenarios. |
-| **Physical Hardware Prototype** | **Under Development** | Breadboard / prototype firmware in progress by hardware team (`firmware/`). |
-| **Hardware JSON Integration** | **Pending Confirmation** | Awaiting sample JSON generated by physical hardware. |
-| **MQTT Broker Configuration** | **Not Finalised** | MQTT code exists in `server.js` as fallback skeleton; no live broker is configured. |
-| **MQTT Hardware Connectivity** | **Not Yet Tested** | Blocked pending hardware selection and broker setup. |
-| **Live Hardware-to-Dashboard Workflow** | **Pending Integration** | Software stack is verified via HTTP simulator; physical device handoff pending. |
-
----
-
-## 3. Telemetry JSON Contract
-
-The backend exposes a strict contract for ingested records at `POST /api/records`. Every payload must satisfy structural, physical range, and cryptographic verification rules.
-
-### Illustrative JSON Payload Example
-*(Note: Example only. Hashes and signatures shown are illustrative placeholders).*
-
-```json
-{
-  "box_id": "TB-DEMO-01",
-  "seq": 214,
-  "ts": 1793471853,
-  "temp_c": 6.5,
-  "humidity": 55.2,
-  "shock": 0,
-  "tilt": 0,
-  "flipped": 0,
-  "light": 35,
-  "lid_open": 0,
-  "event": "NONE",
-  "prev_hash": "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90",
-  "hash": "b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90a1",
-  "sig": "c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2"
-}
-```
-
-### Complete Field Specification
-
-| Field Name | Expected Type | Required? | Meaning / Units | Validation & Range Restrictions |
-| :--- | :--- | :---: | :--- | :--- |
-| `box_id` | String | **Yes** | Unique identifier for physical parcel/box. | Non-empty string; trimmed; e.g. `"TB-001"`, `"TB-DEMO-01"`. |
-| `seq` | Integer | **Yes** | Monotonically increasing sequence number. | Non-negative integer ($\ge 0$). Must strictly equal `previous_seq + 1` (or `0` for genesis). Gaps rejected with HTTP 400; duplicates rejected with HTTP 409. |
-| `ts` | Integer | **Yes** | UNIX timestamp in seconds (epoch time). | Positive integer ($> 0$). Generated at time of measurement. |
-| `temp_c` | Float / Number | **Yes** | Internal cargo temperature in Celsius. | Numeric float formatted to **1 decimal place**; valid physical range: $-60.0^\circ\text{C}$ to $120.0^\circ\text{C}$. |
-| `humidity` | Float / Number | **Yes** | Relative humidity percentage (%RH). | Numeric float formatted to **1 decimal place**; valid range: $0.0\%$ to $100.0\%$. |
-| `shock` | Integer / Boolean | **Yes** | High-g impact or drop detection flag. | Binary `0` (normal) or `1` (shock detected). Boolean `false`/`true` normalized to `0`/`1`. |
-| `tilt` | Integer / Boolean | **Yes** | Angular inclination tilt flag ($> 45^\circ$). | Binary `0` (upright) or `1` (tilted). |
-| `flipped` | Integer / Boolean | **Yes** | Complete inversion flag ($> 135^\circ$). | Binary `0` (upright) or `1` (inverted/upside-down). |
-| `light` | Integer | **Yes** | Ambient light reading inside box (lux). | Non-negative integer ($\ge 0$). High reading indicates enclosure penetration. |
-| `lid_open` | Integer / Boolean | **Yes** | Enclosure switch state flag. | Binary `0` (sealed/closed) or `1` (box opened). |
-| `event` | String | **Yes** | Categorical custody event classification. | String enum: `"NONE"`, `"TEMP_BREACH"`, `"DROP"`, `"FLIPPED"`, `"LID_OPEN"`, `"DELIVERED"`. Defaults to `"NONE"` if empty. |
-| `prev_hash` | String (Hex) | **Yes** | SHA-256 hash of previous record. | Exactly 64 lowercase hexadecimal characters. Genesis record (`seq = 0`) must be exactly 64 zeroes (`0000...0000`). |
-| `hash` | String (Hex) | **Yes** | SHA-256 hash of canonical serialization. | Exactly 64 lowercase hexadecimal characters. Must match `SHA256(canonical_string)`. |
-| `sig` | String (Hex) | **Yes** | HMAC-SHA256 device key signature. | Exactly 64 lowercase hexadecimal characters. Must match `HMAC-SHA256(DEVICE_KEY, hash)`. |
-
-> [!IMPORTANT]
-> **Data Type Parity Requirement:** The hardware team must ensure consistent types. Booleans should be sent as numeric integers (`0` or `1`) or native booleans (`false`/`true`). Field names are case-sensitive.
-
----
-
-## 4. Cryptographic Integrity & Hash-Chain Architecture
-
-TrustBox implements zero-trust verification: data at rest in the database is not inherently trusted. Any party scanning the QR code or querying the API can cryptographically re-audit the ledger from Genesis to the latest record.
-
-### 1. Canonical Serialization String
-To guarantee identical cryptographic hashes across heterogeneous platforms (embedded C/C++ firmware and Node.js), record fields must be converted into a deterministic string joined by the pipe (`|`) delimiter in this strict canonical order:
-
-$$\text{box\_id} \mid \text{seq} \mid \text{ts} \mid \text{temp\_c} \mid \text{humidity} \mid \text{shock} \mid \text{tilt} \mid \text{flipped} \mid \text{light} \mid \text{lid\_open} \mid \text{event} \mid \text{prev\_hash}$$
-
-#### Canonicalization Rules:
-- Floating-point fields (`temp_c`, `humidity`) strictly formatted to 1 decimal place (`Number(val).toFixed(1)`).
-- Boolean flags (`shock`, `tilt`, `flipped`, `lid_open`) normalized to numeric `0` or `1`.
-- Ambient light converted to integer (`parseInt(val, 10) || 0`).
-- If `event` is absent or whitespace, normalized to `"NONE"`.
-- Hashes and signatures converted to lowercase strings.
-
-### 2. Recursive SHA-256 Hash Chaining
-The record hash is computed over the UTF-8 bytes of the canonical string:
-
-$$\text{hash} = \text{SHA-256}(\text{canonical\_string})$$
-
-Every subsequent record embeds the prior record's hash in its `prev_hash` field, creating an unbroken cryptographic link:
-
-$$\text{Record}_{n}.\text{prev\_hash} = \text{Record}_{n-1}.\text{hash}$$
-
-### 3. Genesis Block Anchor
-The initial record (`seq = 0`) has no predecessor and is anchored to a 64-character string of ASCII zeroes:
-
-$$\text{Record}_{0}.\text{prev\_hash} = \text{"0000000000000000000000000000000000000000000000000000000000000000"}$$
-
-### 4. Symmetric HMAC-SHA256 Authentication
-The payload signature is computed using HMAC-SHA256 over the computed hash using a pre-shared secret key:
-
-$$\text{sig} = \text{HMAC-SHA256}(\text{DEVICE\_KEY}, \text{hash})$$
-
-> [!NOTE]
-> **Cryptographic Clarification (Symmetric vs Asymmetric):**
-> TrustBox uses **symmetric-key HMAC-SHA256**, not asymmetric public/private key cryptography. The physical device and the backend share a private pre-shared key (`DEVICE_KEY`). This authenticates that telemetry originated from an authorized box and has not been altered in transit or database storage. It does not provide asymmetric non-repudiation against an entity possessing the device secret.
-
-### 5. Chain Verification Algorithm
-The verification engine ([`backend/chain.js`](file:///home/sky/Documents/trustbox-main/backend/chain.js)) traverses records sorted by `seq` ascending and verifies:
-1. **Genesis Rule:** Record #0 must have `seq === 0` and `prev_hash` matching the 64-zero genesis string.
-2. **Sequence Continuity:** Every record must satisfy $\text{seq}_i = \text{seq}_{i-1} + 1$. Duplicate sequence numbers and sequence gaps immediately break verification.
-3. **Linkage Continuity:** Every record must satisfy $\text{prev\_hash}_i = \text{hash}_{i-1}$.
-4. **Content Integrity:** The canonical string is reconstructed from payload fields. If $\text{SHA256}(\text{canonical}) \neq \text{hash}$, tampering is flagged at that sequence.
-5. **Signature Authenticity:** $\text{HMAC-SHA256}(\text{DEVICE\_KEY}, \text{hash}) == \text{sig}$. An invalid signature indicates unauthorized payload generation.
-
----
-
-## 5. Backend Architecture
-
-The backend is built with Express 4, Mongoose 8, Socket.IO 4, and Node.js native `crypto`.
+## 3. Complete File Structure
 
 ```
-backend/
-├── chain.js              # Canonical string builder, SHA-256, HMAC-SHA256 & verifyChain logic
-├── fake-publisher.js     # Hardware simulator with automatic sequence resumption & CLI flags
-├── insurance.js          # Parametric insurance engine (duration tracking, claim & payout generation)
-├── models.js             # Mongoose schemas: Record, Claim, Payout
-├── package.json          # Dependencies & npm scripts (start, dev, simulate, test, test:api)
-├── package-lock.json
-├── server.js             # Express app, Socket.IO server, ingestion validation, REST endpoints
-├── test-api.js           # 17-point automated API & insurance integration test suite
-└── test-chain.js         # 11-point cryptographic unit test suite
+trustbox-main/
+├── README.md                       ← This file
+├── start-demo.sh                   ← One-command full demo launcher
+├── .gitignore                      ← Excludes .env, node_modules, dist
+│
+├── backend/
+│   ├── server.js                   ← Main Express server (all API + MQTT + Socket.IO)
+│   ├── chain.js                    ← SHA-256 hash chain + HMAC-SHA256 logic
+│   ├── insurance.js                ← Parametric insurance engine
+│   ├── models.js                   ← Mongoose schemas (Record, Claim, Payout)
+│   ├── fake-publisher.js           ← Hardware simulator (no ESP32 needed)
+│   ├── test-chain.js               ← Unit tests: cryptographic chain
+│   ├── test-api.js                 ← Integration tests: all REST endpoints
+│   ├── package.json                ← Backend dependencies
+│   ├── .env                        ← Secret credentials (NEVER committed to git)
+│   └── .env.example                ← Template — copy this to create .env
+│
+├── frontend/
+│   ├── index.html                  ← App shell
+│   ├── vite.config.js              ← Vite dev server + API proxy to :4000
+│   ├── tailwind.config.js          ← Tailwind CSS config
+│   ├── package.json                ← Frontend dependencies
+│   └── src/
+│       ├── main.jsx                ← React entry point
+│       ├── App.jsx                 ← Router (Dashboard + VerifyPage routes)
+│       ├── index.css               ← Global styles + Tailwind directives
+│       ├── pages/
+│       │   ├── Dashboard.jsx       ← Main live monitoring dashboard
+│       │   └── VerifyPage.jsx      ← Public chain verification + QR scanner
+│       └── components/
+│           ├── PayoutCard.jsx      ← Insurance payout display card
+│           ├── QRCodeModal.jsx     ← QR code generator modal
+│           └── RouteMap.jsx        ← Leaflet GPS route map
+│
+├── firmware/
+│   └── trustbox_esp32.ino          ← Arduino sketch for ESP32 hardware
+│
+└── docs/
+    ├── HARDWARE.md                 ← Hardware wiring + pinout reference
+    └── PAYLOAD.md                  ← MQTT payload format specification
 ```
 
-### Module Responsibilities
-- **[`server.js`](file:///home/sky/Documents/trustbox-main/backend/server.js):** Configures HTTP server on port 4000, connects to MongoDB Atlas (with in-memory fallback), enforces ingestion validation schema, handles REST endpoints, and manages Socket.IO live connections. Contains unconfigured MQTT connection skeleton.
-- **[`chain.js`](file:///home/sky/Documents/trustbox-main/backend/chain.js):** Pure cryptographic library. Exports `buildCanonicalString`, `computeHash`, `computeSignature`, `signRecord`, `verifySingleRecord`, and `verifyChain`.
-- **[`insurance.js`](file:///home/sky/Documents/trustbox-main/backend/insurance.js):** Stateful evaluation engine tracking active journey breaches. Handles threshold timing windows and prevents duplicate claims across restarts.
-- **[`models.js`](file:///home/sky/Documents/trustbox-main/backend/models.js):** Defines MongoDB schemas:
-  - `Record`: Stores telemetry documents with compound unique index on `{ box_id: 1, seq: 1 }`.
-  - `Claim`: Stores approved claims (`TEMP_BREACH`, `DROP`, `TILT`, `TAMPER`) with trigger sequence and timestamp.
-  - `Payout`: Stores simulated settlement payouts (`payout_id`, `amount_inr`, `status`, `beneficiary`).
+---
+
+## 4. Technology Stack
+
+### Backend
+| Package | Version | Purpose |
+|---|---|---|
+| `express` | ^4.21 | REST API server |
+| `mongoose` | ^8.8 | MongoDB ODM |
+| `mqtt` | ^5.10 | MQTT client (subscriber + publisher) |
+| `socket.io` | ^4.8 | Real-time WebSocket broadcast |
+| `cors` | ^2.8 | Cross-origin header handling |
+| `dotenv` | ^16.4 | Environment variable loader |
+| Node.js `crypto` | built-in | SHA-256, HMAC-SHA256 |
+
+### Frontend
+| Package | Version | Purpose |
+|---|---|---|
+| `react` | ^18.3 | UI framework |
+| `vite` | ^5.4 | Dev server + bundler |
+| `react-router-dom` | ^6.28 | Client-side routing |
+| `recharts` | ^2.13 | Temperature/humidity charts |
+| `socket.io-client` | ^4.8 | Live data from backend |
+| `leaflet` | ^1.9 | GPS route map |
+| `qrcode.react` | ^4.2 | QR code generation |
+| `lucide-react` | ^1.16 | Icons |
+| `canvas-confetti` | ^1.9 | Payout celebration effect |
+| `tailwindcss` | ^3.4 | Utility CSS |
+
+### Services
+| Service | Purpose |
+|---|---|
+| **MongoDB Atlas** | Cloud database — records, claims, payouts |
+| **HiveMQ Cloud** | Managed MQTT broker with TLS (free tier available) |
 
 ---
 
-## 6. Frontend Architecture
+## 5. How the Full Workflow Works
 
-The frontend is a single-page React 18 application built with Vite 5 and Tailwind CSS.
+This section traces a single telemetry record from sensor reading to dashboard display.
 
+### Step 1 — Sensor Reading (Hardware)
+The ESP32 reads all sensors every 2 seconds:
+- Temperature from DHT22 or DS18B20 (formatted to 1 decimal place)
+- Humidity from DHT22
+- Shock from SW-420 vibration sensor (0 or 1)
+- Tilt/flipped from ball switch or MPU-6050 gyro
+- Lid open from magnetic reed switch (GPIO 5)
+- Light level from LDR photoresistor (ADC on GPIO 34)
+
+### Step 2 — Canonical String Construction (Hardware)
+The firmware builds a deterministic pipe-delimited string from the sensor values:
 ```
-frontend/
-├── index.html            # Main HTML document with Leaflet CSS link
-├── package.json          # Frontend dependencies (react, recharts, leaflet, socket.io-client, etc.)
-├── vite.config.js        # Vite config with proxy routing /api and /socket.io to backend port 4000
-└── src/
-    ├── App.jsx           # React Router route setup (/ and /verify/:boxId)
-    ├── main.jsx          # React DOM root render
-    ├── index.css         # Tailwind directives, custom glassmorphism styles and glow utilities
-    ├── components/
-    │   ├── PayoutCard.jsx   # Payout settlement banner with confetti burst animation
-    │   ├── QRCodeModal.jsx  # QR code generation modal linking to /verify/:boxId
-    │   └── RouteMap.jsx     # Leaflet corridor replay with simulated transit waypoints
-    └── pages/
-        ├── Dashboard.jsx # Main live monitoring dashboard (device selection, charts, judge controls)
-        └── VerifyPage.jsx # Mobile-friendly forensic chain verification page
+box_id|seq|ts|temp_c|humidity|shock|tilt|flipped|light|lid_open|event|prev_hash
 ```
-
-### Key Frontend Features
-- **Device Selection Bar:** Direct `<select>` dropdown populated from `/api/boxes`, quick-switch chips (`TB-DEMO-01`, `TB-TEST`, `TB-001`), and custom box input with dedicated "Load" button.
-- **Race-Condition Protection:** Employs an active request tracking ref (`activeRequestIdRef`) to guarantee that out-of-order responses for previous devices never overwrite the active device.
-- **Live Telemetry & Metrics:** Metric cards for Temperature, Humidity, Shock/Drop, and Lid Switch state with color-coded warning thresholds.
-- **Live Recharts Temperature Stream:** Renders temperature history with an 8.0°C dashed red breach threshold line.
-- **Simulated Corridor Map:** Leaflet map animating transit waypoints between cargo gateway and destination hub. Clearly labeled as a **simulated replay** (device has no onboard GPS receiver).
-- **Hackathon Judge Controls:** Controlled tamper demonstration button that calls `/api/admin/tamper` and triggers immediate forensic failure reporting.
-
----
-
-## 7. Parametric Insurance Engine
-
-TrustBox automates insurance claim adjudication and instant settlement generation using deterministic parameter rules implemented in [`backend/insurance.js`](file:///home/sky/Documents/trustbox-main/backend/insurance.js).
-
-### Implemented Trigger Conditions
-
-#### 1. Cold-Chain Temperature Breach (`TEMP_BREACH`)
-- **Threshold:** Temperature $> 8.0^\circ\text{C}$ (`CLAIM_TEMP_C`).
-- **Duration Requirement:** Sustained breach for at least **15 seconds** (`CLAIM_WINDOW_SEC`).
-- **Timing Logic:** The engine records `tempExceedStartTs` on the first record exceeding 8.0°C. If temperature returns to $\le 8.0^\circ\text{C}$ before 15 seconds elapse, the timer resets to `null`. If $(ts - \text{tempExceedStartTs}) \ge 15\text{s}$, a claim is approved.
-- **Settlement Amount:** **₹50,000** (Simulated instant mock settlement).
-
-#### 2. High Shock / Drop Impact Event (`DROP`)
-- **Threshold:** `shock === 1` or `event === 'DROP'`.
-- **Timing Logic:** Triggered on immediate receipt of a high-g shock event.
-- **Settlement Amount:** **₹25,000** (Simulated instant mock settlement).
-
-### Claim Deduplication & Lifecycle
-- Before approving a claim, the engine queries MongoDB (`Claim.findOne({ box_id, type })`) and checks in-memory journey flags (`hasTempClaim`, `hasDropClaim`).
-- Only **one** temperature breach claim and **one** drop claim are approved per box journey, preventing duplicate payouts.
-- Payout records are assigned unique identifiers (`pay_xxxx`), marked as `status: "TRANSFERRED"`, and broadcast to connected clients via Socket.IO events (`io.emit('claim')`, `io.emit('payout')`).
-
-> [!NOTE]
-> **Simulation Disclosure:** Payout identifiers (`pay_xxx`) and settlements represent automated parametric insurance simulations for demonstration purposes and do not execute live banking disbursements.
-
----
-
-## 8. REST API & WebSocket Documentation
-
-The backend runs on `http://localhost:4000`. All API routes are prefixed with `/api`.
-
-### Endpoints Overview
-
-| Method | Endpoint | Purpose | Access Level |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/health` | Backend and database connectivity health check | Public |
-| `GET` | `/` | Root service directory and endpoint list | Public |
-| `GET` | `/api/boxes` | Retrieve list of registered device box IDs | Public |
-| `GET` | `/api/devices/:boxId/latest` | Retrieve latest sequence and hash to resume chain | Public |
-| `GET` | `/api/records/:boxId` | Retrieve stored historical telemetry records | Public |
-| `POST` | `/api/records` | Ingest new signed telemetry record | Device / Ingestion |
-| `GET` | `/api/verify/:boxId` | Cryptographic audit of full hash chain | Public |
-| `GET` | `/api/claims/:boxId` | Retrieve insurance claims for a box | Public |
-| `GET` | `/api/payouts/:boxId` | Retrieve settlement payouts for a box | Public |
-| `POST` | `/api/admin/tamper/:boxId/:seq` | Maliciously alter a record in storage (Demo) | Testing / Judge |
-| `POST` | `/api/admin/reset/:boxId` | Clear records and reset engine for a box | Testing / Judge |
-
----
-
-### Detailed Endpoint Specifications
-
-#### 1. Ingest Telemetry: `POST /api/records`
-- **Purpose:** Ingests, validates, verifies, and stores a signed telemetry payload.
-- **Request Body:** JSON telemetry payload matching the contract.
-- **Success Response (HTTP 201 Created):**
-  ```json
-  {
-    "status": "received",
-    "box_id": "TB-DEMO-01",
-    "seq": 215,
-    "hash": "b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90a1"
-  }
-  ```
-- **Error Responses:**
-  - `HTTP 400 Bad Request`: Malformed schema, physical range violation, sequence gap, or broken `prev_hash` link.
-  - `HTTP 401 Unauthorized`: Invalid HMAC signature (`DEVICE_KEY` mismatch).
-  - `HTTP 409 Conflict`: Duplicate sequence number ($\text{seq} \le \text{latest\_seq}$).
-
-#### 2. Verify Hash Chain: `GET /api/verify/:boxId`
-- **Purpose:** Audits the complete sequence of records for the specified box from Genesis to tip.
-- **Success Response — Valid Chain (HTTP 200):**
-  ```json
-  {
-    "ok": true,
-    "empty": false,
-    "count": 54,
-    "brokenAt": null,
-    "latestHash": "a21020c5dec3f3cbbd54c26a88f7d3f8b6f871f4c92908e5d79484a17e212cec"
-  }
-  ```
-- **Success Response — Tampered Chain (HTTP 200):**
-  ```json
-  {
-    "ok": false,
-    "count": 5,
-    "brokenAt": 2,
-    "latestHash": "704e033e85f58f795d265a7e41d327bd013056627aa29ce30c635751a79b15aa",
-    "reason": "Hash mismatch at seq #2. Expected: eb99..., got: 2125..."
-  }
-  ```
-- **Success Response — Empty Ledger (HTTP 200):**
-  ```json
-  {
-    "ok": true,
-    "empty": true,
-    "count": 0,
-    "brokenAt": null,
-    "latestHash": null,
-    "genesisHash": "0000000000000000000000000000000000000000000000000000000000000000",
-    "reason": "No telemetry records stored for this box ID."
-  }
-  ```
-
-#### 3. Retrieve Records: `GET /api/records/:boxId`
-- **Query Parameters:** `?limit=N` (defaults to 100, max arbitrary integer).
-- **Success Response (HTTP 200):** Array of record objects sorted ascending by `seq`.
-
-#### 4. Retrieve Latest Device State: `GET /api/devices/:boxId/latest`
-- **Success Response (HTTP 200):**
-  ```json
-  {
-    "box_id": "TB-DEMO-01",
-    "exists": true,
-    "latestSeq": 53,
-    "latestHash": "a21020c5dec3f3cbbd54c26a88f7d3f8b6f871f4c92908e5d79484a17e212cec",
-    "nextSeq": 54,
-    "prevHash": "a21020c5dec3f3cbbd54c26a88f7d3f8b6f871f4c92908e5d79484a17e212cec",
-    "timestamp": 1793471853
-  }
-  ```
-
-#### 5. Admin Tamper Simulation: `POST /api/admin/tamper/:boxId/:seq`
-- **Purpose:** Hackathon demonstration tool. Mutates `temp_c` in database storage without recalculating hash or signature.
-- **Success Response (HTTP 200):**
-  ```json
-  {
-    "success": true,
-    "message": "Record #2 of TB-TEST was tampered! temp_c is now 4.5",
-    "record": { "box_id": "TB-TEST", "seq": 2, "temp_c": 4.5 }
-  }
-  ```
-
-#### 6. Admin Reset: `POST /api/admin/reset/:boxId`
-- **Purpose:** Clears records, claims, payouts, and engine state for demonstration reset.
-- **Safety Rule:** Device `TB-TEST` is protected against accidental wipeout and requires `{ "confirm": true }` in the request body.
-
----
-
-### WebSocket (Socket.IO) Events
-
-- **`connection` / `disconnect`:** Connection lifecycle.
-- **`record` (Server $\rightarrow$ Client):** Broadcasts every newly ingested record.
-- **`event` (Server $\rightarrow$ Client):** Broadcasts records where `event !== 'NONE'`.
-- **`claim` (Server $\rightarrow$ Client):** Broadcasts newly approved insurance claims.
-- **`payout` (Server $\rightarrow$ Client):** Broadcasts generated settlement payout objects.
-- **`tamper` (Server $\rightarrow$ Client):** Broadcasts `{ box_id, seq, new_temp }` when tamper demo executes.
-- **`reset` (Server $\rightarrow$ Client):** Broadcasts `{ box_id }` when demo reset executes.
-
----
-
-## 9. Local Development & Setup Guide
-
-### Prerequisites
-- **Node.js:** v18.0.0 or later (verified on v20.20.2).
-- **npm:** v9.0.0 or later (verified on v10.8.2).
-- **MongoDB Atlas:** Connection URI (or local MongoDB). If MongoDB is offline, the backend automatically falls back to an in-memory store.
-
-### Environment Configuration
-The backend expects configuration variables in `backend/.env`. Placeholder template:
-
-```env
-PORT=4000
-MONGODB_URI=mongodb+srv://<username>:<password>@<cluster>.mongodb.net/trustbox?retryWrites=true&w=majority
-MONGO_URI=mongodb+srv://<username>:<password>@<cluster>.mongodb.net/trustbox?retryWrites=true&w=majority
-
-# MQTT Configuration (Planned - Leave commented out if not using live broker)
-# MQTT_URL=mqtts://<broker-hostname>:8883
-# MQTT_USER=<username>
-# MQTT_PASS=<password>
-
-DEVICE_KEY=trustbox-super-secret-key-32ch
-CLAIM_TEMP_C=8.0
-CLAIM_WINDOW_SEC=15
+Example:
+```
+TB-001|55|1746030000|4.8|54.2|0|0|0|35|0|NONE|1c7060b22f26390...
 ```
 
-> [!CAUTION]
-> Never commit actual passwords, MongoDB URIs, or `DEVICE_KEY` to public repositories.
+### Step 3 — Cryptographic Signing (Hardware)
+1. **SHA-256** of the canonical string → `hash` (64 hex chars)
+2. **HMAC-SHA256** of the `hash` using `DEVICE_KEY` → `sig` (64 hex chars)
+3. Sequence number `seq` increments by 1
+4. `prev_hash` is set to the `hash` of the previous record (or 64 zeros for record #0)
 
-### Installation & Startup Steps
+### Step 4 — MQTT Publish (Hardware → Broker)
+The full signed JSON is published over TLS to the broker:
+```
+Topic:   trustbox/TB-001/telemetry
+Payload: { box_id, seq, ts, temp_c, humidity, shock, tilt, flipped,
+           light, lid_open, event, prev_hash, hash, sig }
+```
 
-#### 1. Start Backend Server
+### Step 5 — Backend MQTT Receive
+The backend is subscribed to `trustbox/+/telemetry` and `trustbox/+/event`. On message arrival it calls `handleIncomingRecord()` which:
+
+1. **Schema validation** — checks all required fields, physical range limits
+2. **Hash verification** — recomputes SHA-256 from canonical string, compares with payload `hash`
+3. **Signature verification** — recomputes HMAC-SHA256 using `DEVICE_KEY`, compares with payload `sig`
+4. **Chain continuity** — checks `seq == latest_seq + 1` and `prev_hash == latest_hash`
+5. **Duplicate rejection** — rejects if seq already exists (MongoDB unique index)
+6. **MongoDB persistence** — saves to `records` collection
+7. **Socket.IO broadcast** — emits `record` event to all connected dashboards
+8. **Insurance evaluation** — passes to insurance engine
+
+### Step 6 — Insurance Engine Evaluation
+`insurance.js` checks every record:
+- If `temp_c > 8.0°C` for more than 15 consecutive seconds → auto-approve `TEMP_BREACH` claim → create payout of ₹50,000
+- If `shock == 1` or `event == "DROP"` → auto-approve `DROP` claim → create payout of ₹25,000
+- Claims and payouts are saved to MongoDB and broadcast via Socket.IO
+
+### Step 7 — Frontend Dashboard Update
+The React dashboard receives the Socket.IO `record` event, updates:
+- Live temperature/humidity chart
+- Custody event log (tamper/drop/breach events)
+- Chain integrity status badge
+- Claims and payout cards (with confetti animation on first payout)
+
+### Step 8 — Chain Verification (Public Audit)
+Any stakeholder can visit `/verify/TB-001` or scan a QR code to run a full cryptographic audit:
+- Fetches all records from `GET /api/verify/:boxId`
+- Re-verifies every SHA-256 hash and HMAC signature in the chain
+- Shows exactly which record was tampered (if any) and when
+
+---
+
+## 6. Cryptographic Security Model
+
+### Hash Chain Structure
+
+```
+Record #0               Record #1               Record #2
+┌────────────────┐      ┌────────────────┐      ┌────────────────┐
+│ prev_hash:     │      │ prev_hash:     │      │ prev_hash:     │
+│ 0000...0000    │      │ hash of #0     │      │ hash of #1     │
+│                │      │                │      │                │
+│ sensor data    │─────▶│ sensor data    │─────▶│ sensor data    │
+│                │      │                │      │                │
+│ hash: SHA256   │      │ hash: SHA256   │      │ hash: SHA256   │
+│ (canonical)    │      │ (canonical)    │      │ (canonical)    │
+│                │      │                │      │                │
+│ sig: HMAC      │      │ sig: HMAC      │      │ sig: HMAC      │
+│ (DEVICE_KEY)   │      │ (DEVICE_KEY)   │      │ (DEVICE_KEY)   │
+└────────────────┘      └────────────────┘      └────────────────┘
+```
+
+### Canonical String Format
+```
+box_id|seq|ts|temp_c|humidity|shock|tilt|flipped|light|lid_open|event|prev_hash
+```
+
+**Critical formatting rules:**
+- `temp_c` and `humidity` → exactly **1 decimal place** (e.g., `4.8` not `4.80`)
+- `shock`, `tilt`, `flipped`, `lid_open` → integer `0` or `1` (not `true`/`false`)
+- `ts` → Unix epoch in **seconds** (not milliseconds)
+- `prev_hash` → 64-character lowercase hex string
+- `event` → `"NONE"` when no anomaly (not empty string)
+
+### Why This Is Tamper-Proof
+If an attacker modifies `temp_c` in record #7:
+1. The SHA-256 hash of record #7's canonical string changes
+2. Record #8's `prev_hash` no longer matches record #7's new hash
+3. Record #8's own canonical string is now wrong, cascading to #9, #10...
+4. The chain verification catches this immediately and reports: `brokenAt: 7`
+
+---
+
+## 7. Insurance Engine Logic
+
+The engine in `backend/insurance.js` runs automatically on every ingested record.
+
+### Temperature Breach Claim
+```
+Trigger:  temp_c > CLAIM_TEMP_C (default 8.0°C) sustained for > CLAIM_WINDOW_SEC (default 15s)
+Payout:   ₹50,000 INR
+Claim:    { type: "TEMP_BREACH", status: "APPROVED" }
+```
+
+### Drop/Impact Claim
+```
+Trigger:  shock == 1 OR event == "DROP" (first occurrence per box)
+Payout:   ₹25,000 INR
+Claim:    { type: "DROP", status: "APPROVED" }
+```
+
+### Claim De-duplication
+Each box gets at most **one TEMP_BREACH claim** and **one DROP claim** per delivery lifecycle. The engine checks MongoDB on startup to restore state across server restarts.
+
+### In-Memory Fallback
+If MongoDB is unavailable, claims and payouts are stored in memory (survive until process restart) and the full insurance flow still works for demo purposes.
+
+---
+
+## 8. Prerequisites — Install Before Anything
+
+### Required Software
+
+| Tool | Minimum Version | Check Command | Install |
+|---|---|---|---|
+| **Node.js** | v18.0+ | `node -v` | [nodejs.org](https://nodejs.org) |
+| **npm** | v9.0+ | `npm -v` | Bundled with Node.js |
+| **Git** | Any | `git --version` | [git-scm.com](https://git-scm.com) |
+
+### Required Accounts (Free)
+
+| Service | Why | Sign Up |
+|---|---|---|
+| **MongoDB Atlas** | Cloud database | [mongodb.com/atlas](https://www.mongodb.com/atlas) |
+| **HiveMQ Cloud** | MQTT broker (optional for demo) | [hivemq.com](https://www.hivemq.com/mqtt-cloud-broker/) |
+
+### For Hardware (Optional — Simulator Available)
+
+| Item | Purpose |
+|---|---|
+| ESP32 DevKit V1 or equivalent | Main microcontroller |
+| DHT22 or DS18B20 | Temperature + humidity sensor |
+| SW-420 vibration switch | Shock/drop detection |
+| Magnetic reed switch | Lid tamper detection |
+| LDR photoresistor | Light intrusion detection |
+| Arduino IDE 2.x | Firmware flashing |
+
+---
+
+## 9. Quick Start (5 Minutes)
+
+> No ESP32 hardware required. Uses the built-in software simulator.
+
+### Clone the Repository
+```bash
+git clone https://github.com/Khubaib-programmer/trustbox.git
+cd trustbox
+```
+
+### Terminal 1 — Backend
 ```bash
 cd backend
 npm install
+cp .env.example .env
+# Edit .env and add your MongoDB Atlas connection string (see step below)
 npm run dev
 ```
-Backend starts on **`http://localhost:4000`**.
 
-#### 2. Start Frontend Dashboard
-In a separate terminal:
+### Terminal 2 — Frontend
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
-Dashboard starts on **`http://localhost:3000`**.
 
-#### 3. Automated One-Command Demo Runner
-The repository includes a helper shell script:
+### Terminal 3 — Simulate Telemetry
 ```bash
-./start-demo.sh
+cd backend
+npm run simulate
 ```
-This script checks Node/npm, installs backend/frontend dependencies if missing, and executes the cryptographic unit test suite.
+
+Open your browser: **http://localhost:3000**
+
+Select device **TB-001** from the dropdown to see live data.
 
 ---
 
-## 10. Hardware Telemetry Simulator (`fake-publisher.js`)
+## 10. Detailed Backend Setup
 
-Located in [`backend/fake-publisher.js`](file:///home/sky/Documents/trustbox-main/backend/fake-publisher.js), the hardware emulator generates cryptographically signed, hash-chained records identical to physical device transmissions.
-
-### Execution Command
-From the `backend/` directory:
+### Step 1 — Install Dependencies
 ```bash
-node fake-publisher.js --boxId TB-DEMO-01 --http
+cd backend
+npm install
 ```
 
-### Automatic State Resumption
-The simulator queries `GET /api/devices/:boxId/latest` before starting:
-- **Existing Device:** Resumes sequence `#nextSeq` using `latestHash` as `prev_hash`. Prevents sequence collisions (`E11000 duplicate key`).
-- **New Device:** Initializes from Genesis (`seq = 0`, `prev_hash = 64 zeros`).
-
-### CLI Scenario Flags
-
-| Flag | Parameter | Description |
-| :--- | :--- | :--- |
-| `--boxId <id>` | String (default: `TB-001`) | Target device ID for simulated transmissions. |
-| `--count <N>` | Integer (default: continuous) | Transmit exactly $N$ records and exit. |
-| `--interval <ms>` | Integer (default: 1500) | Transmission cadence in milliseconds. |
-| `--heat` | Boolean flag | Simulates cold-chain heat breach (~14.5°C). Triggers claim after 15s. |
-| `--drop` | Boolean flag | Simulates high-impact physical shock event. Triggers instant claim. |
-| `--flipped` | Boolean flag | Simulates parcel inversion / upside-down event. |
-| `--lid` | Boolean flag | Simulates opened enclosure lid switch and high ambient light (350 lux). |
-| `--fresh` | Boolean flag | Enforces genesis mode; aborts if box already has records. |
-| `--http` | Boolean flag | Forces direct HTTP transmission to `http://localhost:4000/api/records`. |
-
----
-
-## 11. Planned MQTT Integration
-
-MQTT represents a planned integration path for wireless telemetry delivery once the hardware team selects a cellular or Wi-Fi microcontroller.
-
-### Conceptual MQTT Architecture (Planned)
-
-```mermaid
-flowchart LR
-    ESP32["📦 Physical Hardware Box<br/>(Sensors + Cellular/Wi-Fi)"] -->|1. TLS Port 8883<br/>trustbox/boxId/telemetry| BROKER["☁️ MQTT Broker<br/>(HiveMQ / AWS IoT / EMQX)"]
-    BROKER -->|2. Subscribed Stream| ADAPTER["🔌 Backend MQTT Subscriber<br/>(backend/server.js)"]
-    ADAPTER -->|3. Validate & Check Hash| PIPELINE["⚙️ Ingestion & Cryptographic Pipeline"]
-    PIPELINE -->|4. Store Record| DB[("🗄️ MongoDB Atlas")]
-    PIPELINE -->|5. Real-Time Broadcast| WS["⚡ Socket.IO"]
-    WS --> DASH["💻 React Dashboard"]
-```
-
-### Technical Details to be Finalized with Hardware Team
-Before enabling live MQTT connectivity, the following 15 parameters must be confirmed:
-1. **Microcontroller Model:** (e.g. ESP32-WROOM, ESP32-S3, Nordic nRF9160 cellular).
-2. **Sensor Hardware List:** Exact I2C/SPI sensor ICs (DHT22, SHT31, MPU6050, LDR, etc.).
-3. **Firmware JSON Serialization:** Exact field names, casing, and number precision.
-4. **Broker Selection:** Cloud broker provider (HiveMQ Cloud, EMQX, Mosquitto, AWS IoT Core).
-5. **Topic Hierarchy:** Standardized topic structure (e.g. `trustbox/<box_id>/telemetry` and `trustbox/<box_id>/event`).
-6. **Broker Hostname & Port:** Broker URL and port (typically port 8883 for MQTTS).
-7. **TLS/SSL Encryption:** CA root certificate verification support on the microcontroller.
-8. **Authentication Credentials:** Username/password or mutual TLS (X.509 client certificate).
-9. **Device Identity Provisioning:** How unique `box_id` values are flashed to hardware.
-10. **Telemetry Frequency:** Ingestion interval (e.g. 1s, 5s, 30s) to balance cellular data/battery life.
-11. **Quality of Service (QoS):** QoS 0 (at most once) vs QoS 1 (at least once with ACK).
-12. **Reconnection & Backoff:** Hardware retry strategy on cellular handover or network dropouts.
-13. **Timestamp Source:** Real-Time Clock (RTC), cellular network time (NTP), or GPS epoch.
-14. **Sequence Persistence:** Non-volatile storage (NVS / EEPROM) to prevent sequence reset on battery swap.
-15. **Cryptographic Responsibility:** Confirmation of whether microcontroller computes SHA-256 and HMAC-SHA256 at the edge, or whether an intermediate gateway computes them.
-
-> [!IMPORTANT]
-> **HTTP Fallback as Initial Integration Milestone:** The software backend already supports HTTP POST ingestion (`POST /api/records`). If the hardware team implements Wi-Fi or cellular HTTP requests first, integration can proceed immediately without waiting for MQTT broker provisioning.
-
----
-
-## 12. Information Required from the Hardware Team
-
-To finalize physical hardware handoff, the hardware team must deliver the following checklist:
-
-- [ ] **Confirmed Microcontroller:** Model, clock speed, and RAM/flash specifications.
-- [ ] **Sensor Datasheet & Pinouts:** Sensors wired, measurement units, and calibration offsets.
-- [ ] **Sample JSON File:** One real raw JSON string generated by the microcontroller firmware.
-- [ ] **Timestamp Synchronization Strategy:** Mechanism used by firmware to obtain valid UNIX epoch seconds.
-- [ ] **Non-Volatile Sequence Tracking:** Confirmation that sequence numbers persist across power cycles.
-- [ ] **Edge Cryptography Capability:** Ability of firmware to compute SHA-256 and HMAC-SHA256 (e.g., using `mbedtls` or ESP32 hardware crypto acceleration).
-- [ ] **Transmission Protocol Choice:** Explicit selection of HTTP POST or MQTT MQTTS.
-- [ ] **Offline Buffering Policy:** Confirmation of whether firmware drops or buffers readings during connection loss.
-
----
-
-## 13. Testing & Verification
-
-The software repository includes automated test suites covering cryptographic integrity, API routing, and insurance adjudication.
-
-### 1. Cryptographic Unit Test Suite (`npm test`)
-Verifies mathematical parity of canonical string formatting, SHA-256 hashing, HMAC signatures, genesis anchors, sequence gap detection, duplicate sequence detection, and tamper detection:
-
+### Step 2 — Create Your .env File
 ```bash
-cd backend && npm test
+cp .env.example .env
 ```
 
-#### Historical Results: 11/11 Tests Passed
+Open `.env` in any text editor and fill in the values:
+
+```env
+# Server Port
+PORT=4000
+
+# MongoDB Atlas — Get from Atlas dashboard → Connect → Connect your application
+MONGODB_URI=mongodb+srv://<username>:<password>@<cluster>.mongodb.net/trustbox?retryWrites=true&w=majority
+MONGO_URI=mongodb+srv://<username>:<password>@<cluster>.mongodb.net/trustbox?retryWrites=true&w=majority
+
+# MQTT — HiveMQ Cloud (leave commented out if running simulator-only)
+# MQTT_URL=mqtts://your-cluster-id.hivemq.cloud:8883
+# MQTT_USER=your_hivemq_username
+# MQTT_PASS=your_hivemq_password
+
+# MQTT topic your IoT hardware publishes raw sensor data to
+# (Only needed when MQTT_URL is set)
+IOT_MQTT_TOPIC=trustbox/raw/#
+
+# Cryptographic shared secret — must match DEVICE_KEY on the ESP32 firmware
+DEVICE_KEY=trustbox-super-secret-key-32ch
+
+# Insurance Engine Parameters
+CLAIM_TEMP_C=8.0          # Temperature threshold in Celsius (default: 8.0)
+CLAIM_WINDOW_SEC=15       # How many seconds above threshold triggers claim (default: 15)
 ```
-🧪 RUNNING CRYPTOGRAPHIC HASH CHAIN & HMAC TESTS...
 
- Test 1: Canonical string formatting verified.
- Test 2: SHA256 and HMAC-SHA256 signatures generated.
- Test 3: Full 6-record chain verification passed (6 intact).
- Test 4: Detected temperature tampering at seq #3.
- Test 5: Detected broken hash linkage at seq #4.
- Test 6: Detected invalid cryptographic signature at seq #2.
- Test 7: Detected missing genesis block (starts at #1).
- Test 8: Detected sequence gap at seq #3.
- Test 9: Detected duplicate sequence at seq #1.
- Test 10: Empty chain honestly reports 0 records with empty=true.
- Test 11: Single record cryptographic verification function verified.
+### Step 3 — Set Up MongoDB Atlas (First Time)
+1. Go to [mongodb.com/atlas](https://www.mongodb.com/atlas) → Create free account
+2. Create a free **M0 cluster** (choose any region)
+3. Click **Database Access** → **Add New Database User**
+   - Username: e.g., `trustbox_user`
+   - Password: a strong password
+   - Privilege: **Atlas Admin**
+4. Click **Network Access** → **Add IP Address** → **Allow Access From Anywhere** (for development)
+5. Click **Connect** → **Connect your application** → Copy the connection string
+6. Replace `<password>` in the string with your actual password
+7. Paste into `.env` as `MONGODB_URI`
 
-🎉 ALL 11 CRYPTOGRAPHIC CHAIN & INTEGRITY TESTS PASSED!
-```
-
-### 2. End-to-End API & Insurance Integration Test Suite (`npm run test:api`)
-Spawns isolated temporary device sessions (`TB-AUDIT-*`) against the active database, testing schema validation, unauthenticated rejection, duplicate conflict rejection (HTTP 409), tamper simulation, drop claims, and temperature breach duration thresholds ($>15\text{s}$):
-
+### Step 4 — Start the Backend
 ```bash
-cd backend && npm run test:api
+npm run dev
 ```
 
-#### Historical Results: 17/17 Tests Passed
+Expected output:
 ```
-🧪 RUNNING COMPREHENSIVE BACKEND API & INSURANCE INTEGRATION TESTS...
-
-✅ Test 1: Health endpoint verified (/health).
-✅ Test 2: Boxes listing endpoint verified (/api/boxes).
-✅ Test 3: Latest state returns genesis defaults for new device.
-✅ Test 4: Ingestion rejects malformed payload.
-✅ Test 5: Ingestion rejects unauthenticated HMAC signature.
-✅ Test 6: Ingestion requires initial record to be sequence #0.
-✅ Test 7: Valid genesis record ingested successfully.
-✅ Test 8: Duplicate sequence rejected with HTTP 409 Conflict.
-✅ Test 9: Subsequent chained record seq #1 ingested successfully.
-✅ Test 10: Chain verification returns ok:true with count:2.
-✅ Test 11: Controlled admin tamper executed on seq #1.
-✅ Test 12: Chain verification catches tampered record at seq #1.
-✅ Test 13: High shock DROP event triggers instant insurance claim.
-✅ Test 14: Instant mock payout created (₹25,000).
-✅ Test 15: Temperature breach requires sustained duration (no premature claim at 5s).
-✅ Test 16: Sustained breach (>15s) triggers TEMP_BREACH claim and auto-payout.
-✅ Test 17: Temporary test devices cleaned up cleanly; TB-001 and TB-TEST preserved.
-
-🎉 ALL 17 INTEGRATION & END-TO-END TESTS PASSED SUCCESSFULLY!
+ℹ️ MQTT_URL not configured. Running in HTTP/WebSocket mode.
+🚀 TrustBox Backend running on http://localhost:4000
+   - Verify endpoint: http://localhost:4000/api/verify/:boxId
+   - Tamper endpoint: POST http://localhost:4000/api/admin/tamper/:boxId/:seq
+   - Claim Temp Threshold: 8°C
+   - Claim Window: 15s
+✅ Connected to MongoDB: mongodb+srv://...
 ```
 
-> [!WARNING]
-> **Untested Items:** MQTT connectivity over TLS and live physical hardware transmission have not yet been tested due to pending hardware delivery.
+### Step 5 — Verify Backend Health
+```bash
+curl http://localhost:4000/health
+```
+Expected: `{"status":"ok","mongo":"connected","time":"..."}`
 
 ---
 
-## 14. Demo Devices & Demonstration Workflow
+## 11. Detailed Frontend Setup
 
-The database includes dedicated demonstration devices configured for distinct presentation scenarios:
-
-### 1. `TB-DEMO-01` — Clean Verified Journey (Primary Dataset)
-- **Status:** **Intact & Verified** (`ok: true`, `empty: false`, `count: 54`).
-- **Telemetry History:** 54 valid, unbroken records (#0 through #53).
-- **Latest State:** Temperature ~4.7°C, Humidity ~54.9%, valid SHA-256 chain tip hash (`a21020c5...`).
-- **Purpose:** Demonstrates clean cold-chain custody, live temperature charting, and passing cryptographic audits.
-
-### 2. `TB-TEST` — Forensic Tamper Detection Dataset
-- **Status:** **Tampered / Integrity Failure** (`ok: false`, `brokenAt: 2`).
-- **Telemetry History:** 5 records (#0 through #4).
-- **Tampered Record:** Sequence #2 was deliberately modified in database storage (temperature changed from 5.1°C to 4.5°C without recalculating the hash or signature).
-- **Purpose:** Demonstrates zero-trust audit capability. Shows how the verification UI flips from green to glowing red, identifying the exact broken sequence number.
-
-### 3. `TB-001` — Genesis Baseline
-- **Status:** **Genesis State** (`ok: true`, `empty: true`, `count: 0`).
-- **Purpose:** Demonstrates an initialized device awaiting initial telemetry transmission.
-
-> [!CAUTION]
-> **Database Safety Notice:** Do not delete, reset, or drop `TB-DEMO-01` or `TB-TEST`. They serve as permanent demonstration benchmarks.
-
----
-
-### Step-by-Step 2-Minute Hackathon Demonstration Script
-
-1. **Open Live Dashboard:** Open `http://localhost:3000`.
-2. **Select `TB-DEMO-01`:** Click the `TB-DEMO-01` chip or choose it from the device dropdown.
-   - Observe glowing green badge: **"SAFE COLD CHAIN — ALL PARAMETERS INTACT"**.
-   - Note 54 chained records, latest temp ~4.7°C, and smooth Recharts history.
-3. **Verify Mobile QR Workflow:**
-   - Click **"Scan QR"** or open `http://localhost:3000/verify/TB-DEMO-01`.
-   - The verification screen confirms: **"54 Records Intact — Cryptographic Audit Passed"** with the chain tip SHA-256 hash.
-4. **Demonstrate Tamper Detection on `TB-TEST`:**
-   - Switch device selector to `TB-TEST`.
-   - The UI immediately flips to glowing red: **"TAMPER DETECTED AT SEQ #2"**.
-   - Click **"Inspect Forensic Report"** (`/verify/TB-TEST`) to reveal the cryptographic breakdown showing the exact hash mismatch at record #2.
-5. **Trigger Live Cold-Chain Breach:**
-   - In a terminal, run: `node backend/fake-publisher.js --boxId TB-BREACH --heat --http`
-   - Select `TB-BREACH` on the dashboard. Watch temperature climb to ~14.5°C.
-   - After 15 seconds, an animated payout card appears with a confetti burst: **"Claim Approved — Instant Settlement ₹50,000"**.
-
----
-
-## 15. Security Model, Limitations & Production Readiness
-
-### Implemented Protections
-- **Zero-Trust Storage:** All historical data is audited mathematically; database administrators cannot alter records undetected.
-- **Strict Ingestion Validation:** Schema enforcement, physical range boundary checks, and signature verification before database insertion.
-- **Sequence Gap & Duplicate Prevention:** Sequence numbers strictly enforced; duplicate sequence injections return HTTP 409.
-- **Race-Condition Safe UI:** React refs prevent asynchronous request collisions when switching devices.
-
-### Production Readiness Limitations (Hackathon Prototype)
-- **Symmetric Key Extraction Risk:** The current implementation uses a symmetric shared secret (`DEVICE_KEY`). If an attacker extracts this key from microcontroller firmware, they can forge records. Production devices should utilize a secure element (e.g. ATECC608A) or asymmetric ECDSA signatures.
-- **Admin Endpoints:** `/api/admin/tamper` and `/api/admin/reset` are unauthenticated demonstration tools. In a production deployment, these must be disabled or strictly protected with role-based access control (RBAC).
-- **Physical GPS:** The delivery corridor on the Leaflet map is a simulated replay. Physical hardware prototypes currently lack an onboard GPS receiver.
-- **Simulated Settlements:** Insurance payouts represent automated parametric mock settlements and are not connected to financial clearing networks.
-
----
-
-## 16. Project Roadmap
-
-```
-┌────────────────────────────────────────────────────────┐
-│                    PROJECT ROADMAP                     │
-├─────────┬───────────────────────────────┬──────────────┤
-│ STAGE 1 │ Software Foundation           │  COMPLETED   │
-├─────────┼───────────────────────────────┼──────────────┤
-│ STAGE 2 │ Hardware Prototype Completion │ IN PROGRESS  │
-├─────────┼───────────────────────────────┼──────────────┤
-│ STAGE 3 │ Hardware/Software Contract    │   PENDING    │
-├─────────┼───────────────────────────────┼──────────────┤
-│ STAGE 4 │ Communication Integration     │   PLANNED    │
-├─────────┼───────────────────────────────┼──────────────┤
-│ STAGE 5 │ End-to-End Validation         │   PLANNED    │
-├─────────┼───────────────────────────────┼──────────────┤
-│ STAGE 6 │ Final Live Demonstration      │   PLANNED    │
-└─────────┴───────────────────────────────┴──────────────┘
+### Step 1 — Install Dependencies
+```bash
+cd frontend
+npm install
 ```
 
-- **Stage 1 — Software Foundation [Completed]:** Node.js backend, MongoDB Atlas integration, schema validation, recursive SHA-256 hash chaining, HMAC-SHA256 signature verification, parametric insurance engine, React dashboard, and unit/integration tests.
-- **Stage 2 — Hardware Prototype Completion [In Progress]:** Hardware team wiring sensors (DHT, MPU6050, LDR) to microcontroller board and developing initial firmware sketch.
-- **Stage 3 — Hardware/Software Contract [Pending]:** Exchange real sample JSON payload from physical microcontroller to verify field names, numeric formatting, and epoch timestamp generation.
-- **Stage 4 — Communication Integration [Planned]:** Deploy HTTP POST endpoint or provision MQTT TLS broker; configure firmware transmission cadence and retry strategy.
-- **Stage 5 — End-to-End Validation [Planned]:** Transmit real sensor readings from physical hardware to backend; verify hash chaining, MongoDB persistence, and dashboard display.
-- **Stage 6 — Final Demonstration [Planned]:** Full hardware-in-the-loop demonstration simulating physical cold-chain transit, real-time box opening/light alerts, impact detection, and forensic verification.
+### Step 2 — Start Dev Server
+```bash
+npm run dev
+```
+
+Expected output:
+```
+  VITE v5.4.x  ready in 127 ms
+
+  ➜  Local:   http://localhost:3000/
+  ➜  Network: use --host to expose
+```
+
+### How the Proxy Works
+Vite automatically forwards all `/api/*` and `/socket.io/*` requests to the backend at `http://localhost:4000`. **You do not need to configure anything.** This is set up in `vite.config.js`:
+
+```js
+proxy: {
+  '/api':       { target: 'http://localhost:4000', changeOrigin: true },
+  '/socket.io': { target: 'http://localhost:4000', ws: true }
+}
+```
+
+### Build for Production
+```bash
+npm run build
+```
+Output is placed in `frontend/dist/`. Serve with any static hosting (Vercel, Netlify, GitHub Pages).
 
 ---
 
-## 📄 License
-MIT Hackathon License. Built with ❤️ for **TrustBox**.
+## 12. Environment Variables Reference
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `PORT` | No | `4000` | Express server port |
+| `MONGODB_URI` | **Yes** | local mongo | MongoDB Atlas connection string |
+| `MONGO_URI` | No | same as above | Alias fallback for MongoDB URI |
+| `MQTT_URL` | No | *(MQTT disabled)* | HiveMQ broker URL e.g. `mqtts://xxx.hivemq.cloud:8883` |
+| `MQTT_USER` | No* | — | MQTT broker username (*required if MQTT_URL is set) |
+| `MQTT_PASS` | No* | — | MQTT broker password (*required if MQTT_URL is set) |
+| `IOT_MQTT_TOPIC` | No | `trustbox/raw/#` | MQTT topic for raw IoT hardware payloads |
+| `DEVICE_KEY` | No | `trustbox-super-secret-key-32ch` | Shared HMAC secret — **must match firmware** |
+| `CLAIM_TEMP_C` | No | `8.0` | Temperature breach threshold in °C |
+| `CLAIM_WINDOW_SEC` | No | `15` | Seconds above threshold before claim fires |
+
+> **Security:** Never commit `.env` to git. It is excluded by `.gitignore`. Use `.env.example` as the template.
+
+---
+
+## 13. MQTT Integration Guide
+
+### Setting Up HiveMQ Cloud (Free)
+1. Sign up at [hivemq.com/mqtt-cloud-broker](https://www.hivemq.com/mqtt-cloud-broker/)
+2. Create a cluster → copy the **Cluster URL** (e.g., `abc123.s1.eu.hivemq.cloud`)
+3. Go to **Access Management** → Create a username and password
+4. Update `.env`:
+   ```env
+   MQTT_URL=mqtts://abc123.s1.eu.hivemq.cloud:8883
+   MQTT_USER=your_username
+   MQTT_PASS=your_password
+   ```
+5. Restart the backend — you should see:
+   ```
+   ✅ Connected to HiveMQ / MQTT Broker!
+   ✅ Subscribed to trustbox/+/telemetry  (signed TrustBox records)
+   ✅ Subscribed to trustbox/+/event      (signed TrustBox records)
+   ✅ Subscribed to trustbox/raw/#        (raw IoT hardware payloads)
+   ```
+
+### Topics the Backend Subscribes To
+
+| Topic Pattern | Expected Payload | Used By |
+|---|---|---|
+| `trustbox/+/telemetry` | Fully signed TrustBox record (includes `hash`, `sig`, `seq`) | ESP32 firmware, fake-publisher in MQTT mode |
+| `trustbox/+/event` | Fully signed TrustBox record (same format, event anomalies) | ESP32 firmware on breach |
+| `trustbox/raw/#` | Raw IoT sensor JSON (no `hash`/`sig`/`seq` required) | Any IoT device with `device_id` field |
+
+### MQTT Message Routing Logic
+When a message arrives, the backend checks:
+```
+payload.device_id exists AND payload.hash is missing
+  → Raw IoT path: adapt + compute chain server-side → ingest
+  → Otherwise: standard signed TrustBox path → verify + ingest
+```
+
+---
+
+## 14. IoT Hardware Integration (ESP32)
+
+### Firmware Location
+```
+firmware/trustbox_esp32.ino
+```
+
+### Setup in Arduino IDE
+1. Install **Arduino IDE 2.x** from [arduino.cc](https://www.arduino.cc/en/software)
+2. Add ESP32 board support:
+   - File → Preferences → Additional Boards Manager URLs:
+     ```
+     https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+     ```
+   - Tools → Board → Boards Manager → Search "esp32" → Install
+3. Install required libraries (Sketch → Include Library → Manage Libraries):
+   - `PubSubClient` by Nick O'Leary
+   - `ArduinoJson` by Benoit Blanchon (v7)
+   - `DHT sensor library` by Adafruit (if using DHT22)
+4. Open `firmware/trustbox_esp32.ino`
+5. Fill in your credentials at the top of the sketch:
+   ```cpp
+   const char* WIFI_SSID     = "YOUR_WIFI_SSID";
+   const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
+   const char* MQTT_BROKER   = "your-cluster.hivemq.cloud";
+   const char* MQTT_USER     = "your_hivemq_user";
+   const char* MQTT_PASS     = "your_hivemq_password";
+   const char* BOX_ID        = "TB-001";
+   const char* DEVICE_KEY    = "trustbox-super-secret-key-32ch"; // Must match backend .env
+   ```
+6. Select your board: Tools → Board → ESP32 Dev Module
+7. Select your COM port: Tools → Port
+8. Upload the sketch
+
+### ESP32 Pin Wiring
+
+| Sensor | GPIO | Mode | Purpose |
+|---|---|---|---|
+| DHT22 (Temp + Humidity) | GPIO 15 | Digital Input | Cold-chain temperature monitoring |
+| SW-420 Shock Sensor | GPIO 4 | Digital Input (Pull-up) | Drop/impact detection |
+| Reed Switch (Lid) | GPIO 5 | Digital Input (Pull-up) | Lid tamper detection |
+| LDR Photoresistor | GPIO 34 | Analog ADC | Light intrusion detection |
+| MPU-6050 SDA | GPIO 21 | I2C | Tilt/orientation |
+| MPU-6050 SCL | GPIO 22 | I2C | Tilt/orientation |
+| Status LED | GPIO 2 | Digital Output | Heartbeat / connection indicator |
+
+---
+
+## 15. Raw IoT Payload — New Hardware Format
+
+Your IoT hardware can send a simplified JSON payload **without computing hash/sig/seq**. The backend adapts it automatically.
+
+### Your Device Publishes This (MQTT or HTTP)
+```json
+{
+  "device_id": "box-001",
+  "uptime_ms": 123456,
+  "temperature_dht_c": 24.1,
+  "humidity_pct": 52.0,
+  "temperature_ds18b20_c": 24.3,
+  "photo_raw": 1200,
+  "light_inside": false,
+  "shock": false,
+  "tilt": false,
+  "ball_switch": false,
+  "reed_triggered": false,
+  "delivery_button": false,
+  "breach": false
+}
+```
+
+### What the Backend Does With It
+The server automatically:
+1. Maps `device_id` → `box_id`
+2. Picks `temperature_ds18b20_c` (preferred) or falls back to `temperature_dht_c` → `temp_c`
+3. Maps `humidity_pct` → `humidity`
+4. Maps `reed_triggered` → `lid_open`
+5. Maps `photo_raw` → `light`
+6. Converts all booleans to `0`/`1`
+7. Derives `event` string from `breach`, `shock`, `tilt` flags
+8. **Computes `seq`, `prev_hash`, `hash`, `sig` entirely on the server** (chain maintained per `device_id`)
+9. Saves to MongoDB, broadcasts via Socket.IO, runs insurance engine
+
+### Field Mapping Table
+
+| IoT Field | TrustBox Field | Notes |
+|---|---|---|
+| `device_id` | `box_id` | Direct rename |
+| `temperature_ds18b20_c` | `temp_c` | Preferred over DHT |
+| `temperature_dht_c` | `temp_c` | Fallback if DS18B20 absent |
+| `humidity_pct` | `humidity` | |
+| `photo_raw` | `light` | ADC integer lux value |
+| `reed_triggered` | `lid_open` | Magnetic lid reed switch |
+| `shock` | `shock` | bool → 0/1 |
+| `tilt` | `tilt` | bool → 0/1 |
+| `breach` | `event` | Derives TEMP_BREACH / DROP / etc. |
+| *(server clock)* | `ts` | Unix timestamp in seconds |
+| *(computed)* | `seq` | Next sequence number in chain |
+| *(computed)* | `prev_hash` | Hash of previous record |
+| *(computed)* | `hash` | SHA-256 of canonical string |
+| *(computed)* | `sig` | HMAC-SHA256 signature |
+
+### Sending via MQTT (Raw IoT Topic)
+Set `IOT_MQTT_TOPIC` in `.env` to match what your device publishes to:
+```env
+IOT_MQTT_TOPIC=box-001/telemetry
+# or
+IOT_MQTT_TOPIC=trustbox/raw/#
+```
+
+Your ESP32 or any MQTT client publishes to that topic — the backend handles the rest.
+
+### Sending via HTTP (No MQTT Needed)
+```bash
+curl -X POST http://localhost:4000/api/iot/ingest \
+  -H "Content-Type: application/json" \
+  -d '{
+    "device_id": "box-001",
+    "temperature_dht_c": 24.1,
+    "humidity_pct": 52.0,
+    "temperature_ds18b20_c": 24.3,
+    "photo_raw": 1200,
+    "shock": false,
+    "tilt": false,
+    "reed_triggered": false,
+    "breach": false
+  }'
+```
+
+Expected response:
+```json
+{
+  "ok": true,
+  "record": {
+    "box_id": "box-001",
+    "seq": 0,
+    "temp_c": 24.3,
+    "hash": "1c7060b2...",
+    "sig": "c1f1d0fa..."
+  }
+}
+```
+
+---
+
+## 16. API Reference
+
+Base URL: `http://localhost:4000`
+
+### Records & Telemetry
+
+#### `GET /` — Server Status
+```bash
+curl http://localhost:4000/
+```
+Returns service info, MongoDB status, and all endpoint paths.
+
+#### `POST /api/records` — Ingest Signed Telemetry Record
+For fully signed records (from ESP32 firmware or fake-publisher in MQTT mode).
+```bash
+curl -X POST http://localhost:4000/api/records \
+  -H "Content-Type: application/json" \
+  -d '{ "box_id": "TB-001", "seq": 0, "ts": 1746030000, "temp_c": 4.8,
+        "humidity": 54.2, "shock": 0, "tilt": 0, "flipped": 0,
+        "light": 35, "lid_open": 0, "event": "NONE",
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "hash": "<sha256>", "sig": "<hmac>" }'
+```
+
+#### `POST /api/iot/ingest` — Ingest Raw IoT Payload
+For devices that send simplified sensor data without crypto fields.
+```bash
+curl -X POST http://localhost:4000/api/iot/ingest \
+  -H "Content-Type: application/json" \
+  -d '{ "device_id": "box-001", "temperature_dht_c": 24.1, "humidity_pct": 52.0, ... }'
+```
+
+#### `GET /api/records/:boxId` — Fetch All Records
+```bash
+curl "http://localhost:4000/api/records/TB-001?limit=50"
+```
+Returns array of records in ascending sequence order.
+
+#### `GET /api/verify/:boxId` — Full Chain Verification
+```bash
+curl http://localhost:4000/api/verify/TB-001
+```
+Response:
+```json
+{
+  "ok": true,
+  "empty": false,
+  "count": 214,
+  "brokenAt": null,
+  "latestHash": "a21020c5..."
+}
+```
+If tampered: `"ok": false, "brokenAt": 7, "reason": "Hash mismatch at seq #7..."`
+
+#### `GET /api/devices/:boxId/latest` — Latest Record State
+```bash
+curl http://localhost:4000/api/devices/TB-001/latest
+```
+Returns `{ exists, latestSeq, prevHash, nextSeq }` — used by fake-publisher to resume chain.
+
+#### `GET /api/boxes` — List All Known Box IDs
+```bash
+curl http://localhost:4000/api/boxes
+```
+
+### Insurance & Claims
+
+#### `GET /api/claims/:boxId` — Get All Claims
+```bash
+curl http://localhost:4000/api/claims/TB-001
+```
+
+#### `GET /api/payouts/:boxId` — Get All Payouts
+```bash
+curl http://localhost:4000/api/payouts/TB-001
+```
+
+### Admin / Demo Tools
+
+#### `POST /api/admin/tamper/:boxId/:seq` — Simulate Tamper Attack
+> ⚠️ Demo only. Modifies a record to simulate database tampering — chain verification will then catch it.
+```bash
+curl -X POST http://localhost:4000/api/admin/tamper/TB-001/5
+```
+
+#### `POST /api/admin/reset/:boxId` — Reset Demo Data
+```bash
+curl -X POST http://localhost:4000/api/admin/reset/TB-NEW-DEVICE
+# TB-TEST is protected: requires confirm:true in body
+```
+
+#### `GET /health` — Health Check
+```bash
+curl http://localhost:4000/health
+```
+
+---
+
+## 17. Socket.IO Real-Time Events
+
+The backend broadcasts these events to all connected browser clients.
+
+| Event Name | Payload | When Fired |
+|---|---|---|
+| `record` | Full record object | Every new telemetry record ingested |
+| `event` | Full record object | When `record.event !== "NONE"` |
+| `claim` | Claim object | When insurance claim is auto-approved |
+| `payout` | Payout object | When payout is created |
+| `tamper` | `{ box_id, seq, new_temp }` | When admin tamper endpoint is called |
+| `reset` | `{ box_id }` | When reset endpoint is called |
+
+### Connecting from Frontend
+```js
+import { io } from 'socket.io-client';
+const socket = io(); // proxied by Vite to ws://localhost:4000
+
+socket.on('record', (record) => {
+  console.log('New record:', record.temp_c, '°C');
+});
+socket.on('payout', (payout) => {
+  console.log('Payout approved:', payout.amount_inr, 'INR');
+});
+```
+
+---
+
+## 18. Telemetry Simulator (No Hardware Needed)
+
+`fake-publisher.js` acts as a virtual ESP32 — it generates cryptographically valid records and sends them to the backend.
+
+### Normal Simulation (Safe Cold Chain)
+```bash
+cd backend
+npm run simulate
+```
+Sends records every 1.5 seconds with `temp_c` ~4.6–5.4°C (safe range).
+
+### Simulate Temperature Breach
+```bash
+npm run simulate:heat
+```
+Sends records with `temp_c` ~13.5–15.5°C. After 15 seconds the insurance engine fires a `TEMP_BREACH` claim.
+
+### Simulate Drop/Shock
+```bash
+npm run simulate:drop
+```
+Immediately sends a `DROP` event. Insurance engine fires a `DROP` claim.
+
+### Advanced Options
+```bash
+# Custom box ID (preserves existing demo data)
+node fake-publisher.js --boxId TB-HARDWARE-TEST
+
+# Specific number of records
+node fake-publisher.js --count 20 --boxId TB-TEST-BOX
+
+# Faster publishing (500ms interval)
+node fake-publisher.js --interval 500
+
+# Simulate lid open
+node fake-publisher.js --lid
+
+# Simulate flipped cargo
+node fake-publisher.js --flipped
+
+# Force HTTP mode (skip MQTT even if MQTT_URL is set)
+node fake-publisher.js --http
+
+# Start fresh chain (fails if box already has records, prevents chain corruption)
+node fake-publisher.js --fresh --boxId TB-NEW-001
+```
+
+### Transport Priority
+1. If `MQTT_URL` is set in `.env` → publishes via MQTT
+2. If MQTT connection fails → auto-falls back to `POST /api/records`
+3. If `--http` flag is passed → always uses HTTP
+
+---
+
+## 19. Running Tests
+
+### Unit Tests — Cryptographic Chain (`test-chain.js`)
+```bash
+cd backend
+npm test
+```
+Tests: genesis record creation, hash chain integrity, HMAC signature, tamper detection, chain verification.
+
+### Integration Tests — All API Endpoints (`test-api.js`)
+```bash
+npm run test:api
+```
+Tests: record ingestion, duplicate rejection, chain continuity enforcement, verification endpoint, tamper admin endpoint, claims, payouts.
+
+> Requires backend to be running (`npm run dev` in another terminal) before running `test:api`.
+
+---
+
+## 20. Dashboard Pages Guide
+
+### Main Dashboard — `http://localhost:3000/`
+
+| Section | Description |
+|---|---|
+| **Device Selector** | Dropdown to switch between box IDs |
+| **Chain Status Badge** | Green = verified / Red = tampered with seq number |
+| **Record Count** | Total telemetry records stored |
+| **Temperature Chart** | Live recharts line graph with breach threshold line |
+| **Humidity Chart** | Live humidity percentage over time |
+| **Custody Event Log** | All anomaly events (DROP, TEMP_BREACH, LID_OPEN, FLIPPED) |
+| **Claims Panel** | All approved insurance claims |
+| **Payout Cards** | Insurance payouts with amount and beneficiary |
+| **Route Map** | Leaflet map showing GPS coordinates from telemetry |
+| **QR Code Button** | Generates a scannable verification URL for the current box |
+
+### Verification Page — `http://localhost:3000/verify/:boxId`
+
+Accessible by scanning the QR code or visiting the URL directly. Shows:
+- Full chain integrity result
+- Record count
+- Tamper detection status (broken at which seq)
+- Latest hash fingerprint
+- Timestamp of latest record
+
+---
+
+## 21. Database Schema
+
+### Record Collection
+```js
+{
+  box_id:    String,   // Device identifier (e.g., "TB-001")
+  seq:       Number,   // Sequence number (0-indexed, unique per box)
+  ts:        Number,   // Unix timestamp in seconds
+  temp_c:    Number,   // Temperature in Celsius (1 decimal)
+  humidity:  Number,   // Relative humidity % (1 decimal)
+  shock:     Number,   // 0 or 1 — shock/drop detected
+  tilt:      Number,   // 0 or 1 — tilted
+  flipped:   Number,   // 0 or 1 — inverted
+  light:     Number,   // Light level (ADC / lux)
+  lid_open:  Number,   // 0 or 1 — lid tamper detected
+  event:     String,   // "NONE" | "TEMP_BREACH" | "DROP" | "FLIPPED" | "LID_OPEN"
+  prev_hash: String,   // 64-char hex — hash of previous record
+  hash:      String,   // 64-char SHA-256 hex
+  sig:       String,   // 64-char HMAC-SHA256 hex
+  receivedAt: Date,    // Server receipt timestamp
+  createdAt: Date,     // Auto (mongoose timestamps)
+  updatedAt: Date
+}
+// Unique index on { box_id, seq }
+```
+
+### Claim Collection
+```js
+{
+  box_id:     String,   // Device identifier
+  type:       String,   // "TEMP_BREACH" | "DROP" | "TILT" | "TAMPER"
+  status:     String,   // "APPROVED"
+  reason:     String,   // Human-readable trigger description
+  triggerSeq: Number,   // Sequence number that triggered the claim
+  ts:         Number,   // Timestamp of trigger record
+  createdAt:  Date
+}
+```
+
+### Payout Collection
+```js
+{
+  payout_id:   String,   // Unique ID e.g. "pay_abc123xyz"
+  claim_id:    String,   // Reference to claim _id
+  box_id:      String,   // Device identifier
+  amount_inr:  Number,   // Payout amount in Indian Rupees
+  currency:    String,   // "INR"
+  status:      String,   // "TRANSFERRED"
+  beneficiary: String,   // "PharmaSupply Logistics Ltd."
+  timestamp:   Date
+}
+```
+
+---
+
+## 22. Troubleshooting
+
+### Backend won't start — `EADDRINUSE: port 4000`
+Port is already in use. Kill the existing process:
+```bash
+# Linux/Mac
+fuser -k 4000/tcp
+
+# Or find and kill manually
+lsof -i :4000
+kill -9 <PID>
+```
+
+### MongoDB connection failed
+- Check your `MONGODB_URI` in `.env` — no trailing spaces, password URL-encoded
+- Check MongoDB Atlas → Network Access → your IP is whitelisted (or set `0.0.0.0/0` for dev)
+- Check Atlas → Database Access → user has correct permissions
+- Backend will fall back to in-memory store if MongoDB is unreachable
+
+### Frontend shows "Cannot GET /"
+The frontend is running on port **3000**, not 4000. Open **http://localhost:3000**, not 4000.
+
+### Dashboard shows 0 records
+- Confirm backend is running: `curl http://localhost:4000/health`
+- Run the simulator in another terminal: `cd backend && npm run simulate`
+- Select a device from the dropdown (e.g., `TB-001`)
+- Check browser console for API errors
+
+### MQTT errors: `getaddrinfo ENOTFOUND`
+MQTT is disabled or credentials are wrong. This is expected if `MQTT_URL` is commented out. The system works fully via HTTP — just run `npm run simulate`.
+
+### Simulator fails: `Sequence gap detected`
+The box already has records. The simulator tries to continue the chain automatically. If it fails:
+```bash
+# Use a completely new box ID
+node fake-publisher.js --boxId TB-FRESH-$(date +%s)
+```
+
+### Chain verification shows `ok: false`
+The tamper demo was run (`/api/admin/tamper`). Reset the box to clear tampered records:
+```bash
+curl -X POST http://localhost:4000/api/admin/reset/TB-001
+```
+Then run the simulator again to rebuild a clean chain.
+
+### IoT HTTP ingest returns 400
+Check that:
+- `device_id` field is present in the payload
+- `temperature_dht_c` or `temperature_ds18b20_c` is a valid number
+- `humidity_pct` is between 0 and 100
+
+---
+
+## 23. Demo Scenarios
+
+### Scenario A — Normal Cold Chain (Green)
+```bash
+# Terminal 1: Backend
+npm run dev
+
+# Terminal 2: Frontend
+cd ../frontend && npm run dev
+
+# Terminal 3: Normal simulator
+npm run simulate -- --boxId TB-DEMO
+
+# Browser: http://localhost:3000
+# Select TB-DEMO → watch live temperature chart
+# Chain status: ✅ VERIFIED
+```
+
+### Scenario B — Temperature Breach → Auto Insurance Claim
+```bash
+npm run simulate:heat -- --boxId TB-BREACH-TEST
+
+# Wait ~15 seconds...
+# Dashboard shows: TEMP_BREACH event, Claim APPROVED, Payout ₹50,000
+# Confetti animation fires
+```
+
+### Scenario C — Drop Impact → Instant Claim
+```bash
+npm run simulate:drop -- --boxId TB-DROP-TEST
+
+# Instant: DROP event, Claim APPROVED, Payout ₹25,000
+```
+
+### Scenario D — Tamper Detection Demo
+```bash
+# 1. Simulate a few records
+npm run simulate -- --boxId TB-TAMPER-TEST --count 10
+
+# 2. Maliciously alter a record (simulate database hack)
+curl -X POST http://localhost:4000/api/admin/tamper/TB-TAMPER-TEST/5
+
+# 3. Verify chain — shows tampered
+curl http://localhost:4000/api/verify/TB-TAMPER-TEST
+# → { "ok": false, "brokenAt": 5, "reason": "Hash mismatch at seq #5..." }
+
+# 4. Dashboard shows: ❌ CHAIN BROKEN at #5
+```
+
+### Scenario E — Real Hardware Integration
+```bash
+# 1. Flash firmware/trustbox_esp32.ino to ESP32
+# 2. Set MQTT credentials in both firmware and backend .env
+# 3. Start backend with MQTT enabled
+# 4. Power on ESP32 → watch live data appear in dashboard
+# --- OR for raw IoT format ---
+# POST to /api/iot/ingest from any device
+```
+
+---
+
+## 24. Pushing to GitHub
+
+### First Time Setup
+```bash
+cd trustbox-main
+git init
+git remote add origin https://github.com/Khubaib-programmer/trustbox.git
+```
+
+### Stage and Commit
+```bash
+git add .
+git status          # Verify .env is NOT listed (should be gitignored)
+git commit -m "feat: your commit message"
+```
+
+### Push
+```bash
+git push -u origin main
+```
+
+GitHub will prompt for credentials:
+- **Username:** your GitHub username
+- **Password:** a [Personal Access Token](https://github.com/settings/tokens/new) with `repo` scope (NOT your GitHub password)
+
+### Verify .env is Protected
+```bash
+git check-ignore backend/.env
+# Should print: backend/.env
+# If no output, add to .gitignore:
+echo "backend/.env" >> .gitignore
+```
+
+---
+
+## Project Status
+
+| Feature | Status |
+|---|---|
+| Hash-chain cryptographic engine | ✅ Complete |
+| HMAC-SHA256 record signing | ✅ Complete |
+| MongoDB persistence + fallback | ✅ Complete |
+| MQTT subscriber (signed format) | ✅ Complete |
+| Raw IoT payload adapter (`/api/iot/ingest`) | ✅ Complete |
+| Parametric insurance engine | ✅ Complete |
+| Socket.IO real-time broadcast | ✅ Complete |
+| React dashboard with live charts | ✅ Complete |
+| Chain verification page | ✅ Complete |
+| QR code generation | ✅ Complete |
+| Route map (Leaflet) | ✅ Complete |
+| Hardware simulator (fake-publisher) | ✅ Complete |
+| ESP32 firmware | ✅ Complete |
+| Unit + integration test suite | ✅ Complete |
+| In-memory fallback (no MongoDB) | ✅ Complete |
+
+---
+
+*Built with ❤️ for hackathon — TrustBox Team*
