@@ -1,16 +1,16 @@
 # 📦 TrustBox Pitching Test Suite — Full Audit Report
 
-**Execution Time:** 1/11/2026, 11:22:28 am
+**Execution Time:** 1/11/2026, 11:36:45 am
 
 ## 📋 Judge Presentation Summary Table
 
 | Item | Box ID | Monitored Hazard | Breach Detected | Final Verdict | Parametric Payout | Test Status |
 |---|---|---|---|---|---|---|
-| 💉 mRNA Polio/COVID Vaccine (Cold Chain Biologics) | `VACCINE-001` | Strict Cold Chain (2.0°C – 8.0°C) | TEMP_BREACH | **❌ NOT DELIVERED** | ₹150,000 | ✅ PASS |
-| 🎂 Designer 3-Tier Cream Cake (Perishable Confectionery) | `CAKE-001` | Cold Chain (≤ 8°C) & Mechanical Vibration | DROP + TEMP_BREACH | **❌ DELIVERY CANCELLED** | ₹75,000 | ✅ PASS |
-| 📺 55" 4K OLED Smart TV (High-End Electronics) | `TV-001` | High-G Drop Shock & Moisture (≤ 70% Humidity) | DROP + HUMIDITY_BREACH | **❌ DELIVERY CANCELLED** | ₹75,000 | ✅ PASS |
-| 💎 Luxury Bohemian Crystal Glassware (Ultra-Fragile) | `FRAGILE-001` | Upright Orientation (Tilt / Inversion) & Shock | TILT + DROP | **❌ NOT DELIVERED** | ₹70,000 | ✅ PASS |
-| 💻 RTX 4090 Gaming Laptop (Precision Hardware) | `ELECTRONIC-001` | Mechanical G-Force Impact & Moisture | DROP | **❌ NOT DELIVERED** | ₹45,000 | ✅ PASS |
+| 💉 mRNA Polio/COVID Vaccine (Cold Chain Biologics) | `VACCINE-001` | Strict Cold Chain (2.0°C – 8.0°C) | TEMP_BREACH | **❌ RETURNED** | ₹150,000 | ✅ PASS |
+| 🎂 Designer 3-Tier Cream Cake (Perishable Confectionery) | `CAKE-001` | Cold Chain (≤ 8°C) & Mechanical Vibration | DROP + TEMP_BREACH | **❌ RETURNED** | ₹75,000 | ✅ PASS |
+| 📺 55" 4K OLED Smart TV (High-End Electronics) | `TV-001` | High-G Drop Shock & Moisture (≤ 70% Humidity) | DROP + HUMIDITY_BREACH | **❌ RETURNED** | ₹75,000 | ✅ PASS |
+| 💎 Luxury Bohemian Crystal Glassware (Ultra-Fragile) | `FRAGILE-001` | Upright Orientation (Tilt / Inversion) & Shock | TILT + DROP | **❌ RETURNED** | ₹70,000 | ✅ PASS |
+| 💻 RTX 4090 Gaming Laptop (Precision Hardware) | `ELECTRONIC-001` | Mechanical G-Force Impact & Moisture | DROP | **❌ RETURNED** | ₹45,000 | ✅ PASS |
 | 📚 Hardcover Medical Encyclopedias (Durable Goods) | `BOOKS-001` | Complete Cryptographic Proof-of-Delivery | None (Safe) | **✅ DELIVERED** | ₹0 | ✅ PASS |
 
 ---
@@ -22,14 +22,14 @@
 - **Monitored Hazard:** Strict Cold Chain (2.0°C – 8.0°C)
 - **Incident Narrative:** Dry ice packaging depletes midway in remote transit. Temperature exceeds 8°C for >15s, neutralizing active viral antigens.
 - **Cryptographic Hash Chain:** ✅ 100% Intact & Unbroken (SHA-256 + HMAC-SHA256 Valid)
-- **Final Delivery Verdict:** **NOT DELIVERED** (Expected: NOT DELIVERED)
+- **Final Delivery Verdict:** **RETURNED** (Expected: RETURNED)
 - **Parametric Claims Approved:** 1
   - **Claim Type:** `TEMP_BREACH`
   - **Trigger Reason:** Critical Vaccine Cold-Chain Failure: Temperature 17.2°C exceeded 8.0°C for 17s. Active antigens neutralized. Payout auto-settled.
   - **Status:** `APPROVED`
 - **Automated Insurance Settlement:** 1
   - **Settlement Amount:** **₹150,000 INR**
-  - **Transaction ID:** `pay_tkreepq5ov34`
+  - **Transaction ID:** `pay_bwih95tkwkha`
   - **Beneficiary:** Serum Institute Logistics Ltd.
   - **Status:** `TRANSFERRED` (Instant Parametric Transfer)
 
@@ -40,7 +40,7 @@
 - **Monitored Hazard:** Cold Chain (≤ 8°C) & Mechanical Vibration
 - **Incident Narrative:** Van hits a major roadway pothole (SW-420 > 4.5G drop), cracking refrigeration seal. Temperature surges to 36.5°C in direct heat, melting cream.
 - **Cryptographic Hash Chain:** ✅ 100% Intact & Unbroken (SHA-256 + HMAC-SHA256 Valid)
-- **Final Delivery Verdict:** **DELIVERY CANCELLED** (Expected: DELIVERY CANCELLED)
+- **Final Delivery Verdict:** **RETURNED** (Expected: RETURNED)
 - **Parametric Claims Approved:** 2
   - **Claim Type:** `DROP`
   - **Trigger Reason:** Violent van pothole impact: Cake structural collapse and side container damage. Delivery cancelled.
@@ -50,11 +50,11 @@
   - **Status:** `APPROVED`
 - **Automated Insurance Settlement:** 2
   - **Settlement Amount:** **₹25,000 INR**
-  - **Transaction ID:** `pay_rq2r8xarx0pq`
+  - **Transaction ID:** `pay_deoep4fu9jo3`
   - **Beneficiary:** CakeCraft Confectionery Ltd.
   - **Status:** `TRANSFERRED` (Instant Parametric Transfer)
   - **Settlement Amount:** **₹50,000 INR**
-  - **Transaction ID:** `pay_jq5ozi5xdjfb`
+  - **Transaction ID:** `pay_z4wapo1clf5v`
   - **Beneficiary:** CakeCraft Confectionery Ltd.
   - **Status:** `TRANSFERRED` (Instant Parametric Transfer)
 
@@ -65,7 +65,7 @@
 - **Monitored Hazard:** High-G Drop Shock & Moisture (≤ 70% Humidity)
 - **Incident Narrative:** Cargo truck container experiences violent drop impacts (>6.5G to 8.0G) off transport pallet, shattering OLED panel followed by roof leak.
 - **Cryptographic Hash Chain:** ✅ 100% Intact & Unbroken (SHA-256 + HMAC-SHA256 Valid)
-- **Final Delivery Verdict:** **DELIVERY CANCELLED** (Expected: DELIVERY CANCELLED)
+- **Final Delivery Verdict:** **RETURNED** (Expected: RETURNED)
 - **Parametric Claims Approved:** 2
   - **Claim Type:** `DROP`
   - **Trigger Reason:** Violent High-G Drop Impact Detected: OLED display panel shattered against cargo barrier. Delivery cancelled.
@@ -75,11 +75,11 @@
   - **Status:** `APPROVED`
 - **Automated Insurance Settlement:** 2
   - **Settlement Amount:** **₹45,000 INR**
-  - **Transaction ID:** `pay_hvb5giz8y3og`
+  - **Transaction ID:** `pay_jts0wf954kg0`
   - **Beneficiary:** Sony Electronics Logistics Ltd.
   - **Status:** `TRANSFERRED` (Instant Parametric Transfer)
   - **Settlement Amount:** **₹30,000 INR**
-  - **Transaction ID:** `pay_tmsdmnas8u7g`
+  - **Transaction ID:** `pay_pctaif0me5ko`
   - **Beneficiary:** Sony Electronics Logistics Ltd.
   - **Status:** `TRANSFERRED` (Instant Parametric Transfer)
 
@@ -90,7 +90,7 @@
 - **Monitored Hazard:** Upright Orientation (Tilt / Inversion) & Shock
 - **Incident Narrative:** Courier ignores "THIS SIDE UP" labels. Package is tilted over 60° and flipped upside down on automated sorting conveyor.
 - **Cryptographic Hash Chain:** ✅ 100% Intact & Unbroken (SHA-256 + HMAC-SHA256 Valid)
-- **Final Delivery Verdict:** **NOT DELIVERED** (Expected: NOT DELIVERED)
+- **Final Delivery Verdict:** **RETURNED** (Expected: RETURNED)
 - **Parametric Claims Approved:** 2
   - **Claim Type:** `TILT`
   - **Trigger Reason:** Fragile cargo tipped / inverted (Tilt/Flipped: 1) - 'THIS SIDE UP' violation, Glassware shattered.
@@ -100,11 +100,11 @@
   - **Status:** `APPROVED`
 - **Automated Insurance Settlement:** 2
   - **Settlement Amount:** **₹35,000 INR**
-  - **Transaction ID:** `pay_kqmo9p1xsb7b`
+  - **Transaction ID:** `pay_5w66mvw29nba`
   - **Beneficiary:** Bohemia Crystal Imports Ltd.
   - **Status:** `TRANSFERRED` (Instant Parametric Transfer)
   - **Settlement Amount:** **₹35,000 INR**
-  - **Transaction ID:** `pay_rqf1xuvmk0kg`
+  - **Transaction ID:** `pay_kh98iemj49ki`
   - **Beneficiary:** Bohemia Crystal Imports Ltd.
   - **Status:** `TRANSFERRED` (Instant Parametric Transfer)
 
@@ -115,14 +115,14 @@
 - **Monitored Hazard:** Mechanical G-Force Impact & Moisture
 - **Incident Narrative:** Delivery agent accidentally drops laptop case from 1.5 meters during delivery handoff (> 5G impact detected).
 - **Cryptographic Hash Chain:** ✅ 100% Intact & Unbroken (SHA-256 + HMAC-SHA256 Valid)
-- **Final Delivery Verdict:** **NOT DELIVERED** (Expected: NOT DELIVERED)
+- **Final Delivery Verdict:** **RETURNED** (Expected: RETURNED)
 - **Parametric Claims Approved:** 1
   - **Claim Type:** `DROP`
   - **Trigger Reason:** Severe mechanical shock (>5G): Motherboard micro-trace crack hazard detected.
   - **Status:** `APPROVED`
 - **Automated Insurance Settlement:** 1
   - **Settlement Amount:** **₹45,000 INR**
-  - **Transaction ID:** `pay_8k2deh92ocgq`
+  - **Transaction ID:** `pay_wn8qrimpor7i`
   - **Beneficiary:** Dell Global Logistics Corp.
   - **Status:** `TRANSFERRED` (Instant Parametric Transfer)
 

@@ -1,6 +1,6 @@
 {
-  "simulationTimestamp": "2026-11-01T05:52:28.938Z",
-  "backendUrl": "http://localhost:4000",
+  "simulationTimestamp": "2026-11-01T06:06:45.396Z",
+  "backendUrl": "https://trustbox-nine.vercel.app",
   "allTestsPassed": true,
   "results": [
     {
@@ -11,8 +11,8 @@
       "description": "Dry ice packaging depletes midway in remote transit. Temperature exceeds 8°C for >15s, neutralizing active viral antigens.",
       "recordsSent": 6,
       "chainVerified": true,
-      "actualOutcome": "NOT DELIVERED",
-      "expectedOutcome": "NOT DELIVERED",
+      "actualOutcome": "RETURNED",
+      "expectedOutcome": "RETURNED",
       "testPassed": true,
       "claims": [
         {
@@ -21,20 +21,20 @@
           "status": "APPROVED",
           "reason": "Critical Vaccine Cold-Chain Failure: Temperature 17.2°C exceeded 8.0°C for 17s. Active antigens neutralized. Payout auto-settled.",
           "triggerSeq": 5,
-          "ts": 1793512281,
-          "createdAt": "2026-11-01T05:51:59.985Z"
+          "ts": 1793513114,
+          "createdAt": "2026-11-01T06:05:55.081Z"
         }
       ],
       "payouts": [
         {
-          "payout_id": "pay_tkreepq5ov34",
+          "payout_id": "pay_bwih95tkwkha",
           "claim_id": "5",
           "box_id": "VACCINE-001",
           "amount_inr": 150000,
           "currency": "INR",
           "status": "TRANSFERRED",
           "beneficiary": "Serum Institute Logistics Ltd.",
-          "timestamp": "2026-11-01T05:51:59.985Z"
+          "timestamp": "2026-11-01T06:05:55.081Z"
         }
       ],
       "totalPayoutINR": 150000
@@ -47,8 +47,8 @@
       "description": "Van hits a major roadway pothole (SW-420 > 4.5G drop), cracking refrigeration seal. Temperature surges to 36.5°C in direct heat, melting cream.",
       "recordsSent": 6,
       "chainVerified": true,
-      "actualOutcome": "DELIVERY CANCELLED",
-      "expectedOutcome": "DELIVERY CANCELLED",
+      "actualOutcome": "RETURNED",
+      "expectedOutcome": "RETURNED",
       "testPassed": true,
       "claims": [
         {
@@ -57,8 +57,8 @@
           "status": "APPROVED",
           "reason": "Violent van pothole impact: Cake structural collapse and side container damage. Delivery cancelled.",
           "triggerSeq": 3,
-          "ts": 1793512270,
-          "createdAt": "2026-11-01T05:52:04.613Z"
+          "ts": 1793513108,
+          "createdAt": "2026-11-01T06:06:03.763Z"
         },
         {
           "box_id": "CAKE-001",
@@ -66,30 +66,30 @@
           "status": "APPROVED",
           "reason": "Severe Temperature Breach: Reached 36.5°C (> 8.0°C limit) for 17s. Cream melted and decorations liquefied. Delivery cancelled.",
           "triggerSeq": 5,
-          "ts": 1793512287,
-          "createdAt": "2026-11-01T05:52:05.822Z"
+          "ts": 1793513125,
+          "createdAt": "2026-11-01T06:06:05.832Z"
         }
       ],
       "payouts": [
         {
-          "payout_id": "pay_rq2r8xarx0pq",
+          "payout_id": "pay_deoep4fu9jo3",
           "claim_id": "3",
           "box_id": "CAKE-001",
           "amount_inr": 25000,
           "currency": "INR",
           "status": "TRANSFERRED",
           "beneficiary": "CakeCraft Confectionery Ltd.",
-          "timestamp": "2026-11-01T05:52:04.613Z"
+          "timestamp": "2026-11-01T06:06:03.763Z"
         },
         {
-          "payout_id": "pay_jq5ozi5xdjfb",
+          "payout_id": "pay_z4wapo1clf5v",
           "claim_id": "5",
           "box_id": "CAKE-001",
           "amount_inr": 50000,
           "currency": "INR",
           "status": "TRANSFERRED",
           "beneficiary": "CakeCraft Confectionery Ltd.",
-          "timestamp": "2026-11-01T05:52:05.822Z"
+          "timestamp": "2026-11-01T06:06:05.832Z"
         }
       ],
       "totalPayoutINR": 75000
@@ -102,8 +102,8 @@
       "description": "Cargo truck container experiences violent drop impacts (>6.5G to 8.0G) off transport pallet, shattering OLED panel followed by roof leak.",
       "recordsSent": 5,
       "chainVerified": true,
-      "actualOutcome": "DELIVERY CANCELLED",
-      "expectedOutcome": "DELIVERY CANCELLED",
+      "actualOutcome": "RETURNED",
+      "expectedOutcome": "RETURNED",
       "testPassed": true,
       "claims": [
         {
@@ -112,8 +112,8 @@
           "status": "APPROVED",
           "reason": "Violent High-G Drop Impact Detected: OLED display panel shattered against cargo barrier. Delivery cancelled.",
           "triggerSeq": 2,
-          "ts": 1793512274,
-          "createdAt": "2026-11-01T05:52:09.840Z"
+          "ts": 1793513116,
+          "createdAt": "2026-11-01T06:06:12.659Z"
         },
         {
           "box_id": "TV-001",
@@ -121,30 +121,30 @@
           "status": "APPROVED",
           "reason": "High humidity breach detected: 88% (Threshold: 70%) - Circuit Short Risk, Returned",
           "triggerSeq": 3,
-          "ts": 1793512276,
-          "createdAt": "2026-11-01T05:52:10.443Z"
+          "ts": 1793513118,
+          "createdAt": "2026-11-01T06:06:13.550Z"
         }
       ],
       "payouts": [
         {
-          "payout_id": "pay_hvb5giz8y3og",
+          "payout_id": "pay_jts0wf954kg0",
           "claim_id": "2",
           "box_id": "TV-001",
           "amount_inr": 45000,
           "currency": "INR",
           "status": "TRANSFERRED",
           "beneficiary": "Sony Electronics Logistics Ltd.",
-          "timestamp": "2026-11-01T05:52:09.840Z"
+          "timestamp": "2026-11-01T06:06:12.659Z"
         },
         {
-          "payout_id": "pay_tmsdmnas8u7g",
+          "payout_id": "pay_pctaif0me5ko",
           "claim_id": "3",
           "box_id": "TV-001",
           "amount_inr": 30000,
           "currency": "INR",
           "status": "TRANSFERRED",
           "beneficiary": "Sony Electronics Logistics Ltd.",
-          "timestamp": "2026-11-01T05:52:10.443Z"
+          "timestamp": "2026-11-01T06:06:13.550Z"
         }
       ],
       "totalPayoutINR": 75000
@@ -157,8 +157,8 @@
       "description": "Courier ignores \"THIS SIDE UP\" labels. Package is tilted over 60° and flipped upside down on automated sorting conveyor.",
       "recordsSent": 4,
       "chainVerified": true,
-      "actualOutcome": "NOT DELIVERED",
-      "expectedOutcome": "NOT DELIVERED",
+      "actualOutcome": "RETURNED",
+      "expectedOutcome": "RETURNED",
       "testPassed": true,
       "claims": [
         {
@@ -167,8 +167,8 @@
           "status": "APPROVED",
           "reason": "Fragile cargo tipped / inverted (Tilt/Flipped: 1) - 'THIS SIDE UP' violation, Glassware shattered.",
           "triggerSeq": 2,
-          "ts": 1793512279,
-          "createdAt": "2026-11-01T05:52:15.065Z"
+          "ts": 1793513125,
+          "createdAt": "2026-11-01T06:06:22.729Z"
         },
         {
           "box_id": "FRAGILE-001",
@@ -176,30 +176,30 @@
           "status": "APPROVED",
           "reason": "Drop shock detected: Ultra-fragile glassware shattered in transit.",
           "triggerSeq": 3,
-          "ts": 1793512281,
-          "createdAt": "2026-11-01T05:52:15.669Z"
+          "ts": 1793513127,
+          "createdAt": "2026-11-01T06:06:23.731Z"
         }
       ],
       "payouts": [
         {
-          "payout_id": "pay_kqmo9p1xsb7b",
+          "payout_id": "pay_5w66mvw29nba",
           "claim_id": "2",
           "box_id": "FRAGILE-001",
           "amount_inr": 35000,
           "currency": "INR",
           "status": "TRANSFERRED",
           "beneficiary": "Bohemia Crystal Imports Ltd.",
-          "timestamp": "2026-11-01T05:52:15.065Z"
+          "timestamp": "2026-11-01T06:06:22.729Z"
         },
         {
-          "payout_id": "pay_rqf1xuvmk0kg",
+          "payout_id": "pay_kh98iemj49ki",
           "claim_id": "3",
           "box_id": "FRAGILE-001",
           "amount_inr": 35000,
           "currency": "INR",
           "status": "TRANSFERRED",
           "beneficiary": "Bohemia Crystal Imports Ltd.",
-          "timestamp": "2026-11-01T05:52:15.669Z"
+          "timestamp": "2026-11-01T06:06:23.731Z"
         }
       ],
       "totalPayoutINR": 70000
@@ -212,8 +212,8 @@
       "description": "Delivery agent accidentally drops laptop case from 1.5 meters during delivery handoff (> 5G impact detected).",
       "recordsSent": 4,
       "chainVerified": true,
-      "actualOutcome": "NOT DELIVERED",
-      "expectedOutcome": "NOT DELIVERED",
+      "actualOutcome": "RETURNED",
+      "expectedOutcome": "RETURNED",
       "testPassed": true,
       "claims": [
         {
@@ -222,20 +222,20 @@
           "status": "APPROVED",
           "reason": "Severe mechanical shock (>5G): Motherboard micro-trace crack hazard detected.",
           "triggerSeq": 3,
-          "ts": 1793512286,
-          "createdAt": "2026-11-01T05:52:20.295Z"
+          "ts": 1793513136,
+          "createdAt": "2026-11-01T06:06:31.482Z"
         }
       ],
       "payouts": [
         {
-          "payout_id": "pay_8k2deh92ocgq",
+          "payout_id": "pay_wn8qrimpor7i",
           "claim_id": "3",
           "box_id": "ELECTRONIC-001",
           "amount_inr": 45000,
           "currency": "INR",
           "status": "TRANSFERRED",
           "beneficiary": "Dell Global Logistics Corp.",
-          "timestamp": "2026-11-01T05:52:20.295Z"
+          "timestamp": "2026-11-01T06:06:31.482Z"
         }
       ],
       "totalPayoutINR": 45000

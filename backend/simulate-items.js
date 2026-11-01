@@ -15,11 +15,17 @@
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const { GENESIS_PREV_HASH, signRecord } = require('./chain');
 
 const DEVICE_KEY = process.env.DEVICE_KEY || 'trustbox-super-secret-key-32ch';
 const BACKEND_PORT = process.env.PORT || 4000;
+const TARGET_URL = process.env.TARGET_URL || `http://localhost:${BACKEND_PORT}`;
+const targetUrlObj = new URL(TARGET_URL);
+const isHttps = targetUrlObj.protocol === 'https:';
+const client = isHttps ? https : http;
+
 const INTERVAL_MS = 600; // Fast 600ms per step for snappy pitching demo
 const RESULTS_JSON = __dirname + '/simulation-results.json';
 const REPORT_MD = __dirname + '/simulation-report.md';
@@ -31,7 +37,7 @@ const ITEMS = [
     category: 'Critical Biological Vaccine',
     monitoredHazard: 'Strict Cold Chain (2.0°C – 8.0°C)',
     description: 'Dry ice packaging depletes midway in remote transit. Temperature exceeds 8°C for >15s, neutralizing active viral antigens.',
-    expectedOutcome: 'NOT DELIVERED',
+    expectedOutcome: 'RETURNED',
     expectedClaimType: 'TEMP_BREACH',
     records: [
       { temp_c: 4.2, humidity: 45.0, shock: 0, tilt: 0, flipped: 0, event: 'NONE', note: 'Central Pharma Depository: Dispatched in cryogenic cooler (4.2°C)', dt: 2 },
@@ -49,7 +55,7 @@ const ITEMS = [
     category: 'Perishable & Fragile Bakery',
     monitoredHazard: 'Cold Chain (≤ 8°C) & Mechanical Vibration',
     description: 'Van hits a major roadway pothole (SW-420 > 4.5G drop), cracking refrigeration seal. Temperature surges to 36.5°C in direct heat, melting cream.',
-    expectedOutcome: 'DELIVERY CANCELLED',
+    expectedOutcome: 'RETURNED',
     expectedClaimType: 'DROP & TEMP_BREACH',
     records: [
       { temp_c: 4.8, humidity: 55.0, shock: 0, tilt: 0, flipped: 0, event: 'NONE', note: 'Bakery dispatch: Chilled display box (4.8°C, 0G shock)', dt: 2 },
@@ -67,7 +73,7 @@ const ITEMS = [
     category: 'Fragile Glass & Precision Circuitry',
     monitoredHazard: 'High-G Drop Shock & Moisture (≤ 70% Humidity)',
     description: 'Cargo truck container experiences violent drop impacts (>6.5G to 8.0G) off transport pallet, shattering OLED panel followed by roof leak.',
-    expectedOutcome: 'DELIVERY CANCELLED',
+    expectedOutcome: 'RETURNED',
     expectedClaimType: 'DROP & HUMIDITY_BREACH',
     records: [
       { temp_c: 22.0, humidity: 50.0, shock: 0, tilt: 0, flipped: 0, event: 'NONE', note: 'Sony Central Warehouse: Dispatched in sealed foam packaging', dt: 2 },
@@ -75,7 +81,7 @@ const ITEMS = [
       // High-G multiple shock impacts
       { temp_c: 23.0, humidity: 58.0, shock: 1, tilt: 0, flipped: 0, event: 'DROP', note: '💥 VIOLENT TRANSIT DROP (SW-420 > 6.5G Shock)! Box thrown off transport pallet during emergency brake!', dt: 2 },
       { temp_c: 23.5, humidity: 88.0, shock: 1, tilt: 0, flipped: 0, event: 'DROP', note: '💥 CRITICAL REPEATED SHOCK IMPACT (>8.0G)! OLED display panel shattered against vehicle bulkhead! Moisture entering!', dt: 2 },
-      { temp_c: 23.8, humidity: 92.5, shock: 1, tilt: 0, flipped: 0, event: 'HUMIDITY_BREACH', note: '🚨 Severe high-G drop shock + moisture flood (92.5%)! Complete panel & board destruction. DELIVERY CANCELLED!', dt: 2 }
+      { temp_c: 23.8, humidity: 92.5, shock: 1, tilt: 0, flipped: 0, event: 'HUMIDITY_BREACH', note: '🚨 Severe high-G drop shock + moisture flood (92.5%)! Complete panel & board destruction. RETURNED!', dt: 2 }
     ]
   },
   {
@@ -84,7 +90,7 @@ const ITEMS = [
     category: 'Ultra-Fragile Glassware',
     monitoredHazard: 'Upright Orientation (Tilt / Inversion) & Shock',
     description: 'Courier ignores "THIS SIDE UP" labels. Package is tilted over 60° and flipped upside down on automated sorting conveyor.',
-    expectedOutcome: 'NOT DELIVERED',
+    expectedOutcome: 'RETURNED',
     expectedClaimType: 'TILT & DROP',
     records: [
       { temp_c: 21.0, humidity: 48.0, shock: 0, tilt: 0, flipped: 0, event: 'NONE', note: 'Artisan Glass Studio: Packed with air bubble cushioning, upright (0° tilt)', dt: 2 },
@@ -100,7 +106,7 @@ const ITEMS = [
     category: 'Premium Computing Electronics',
     monitoredHazard: 'Mechanical G-Force Impact & Moisture',
     description: 'Delivery agent accidentally drops laptop case from 1.5 meters during delivery handoff (> 5G impact detected).',
-    expectedOutcome: 'NOT DELIVERED',
+    expectedOutcome: 'RETURNED',
     expectedClaimType: 'DROP',
     records: [
       { temp_c: 23.0, humidity: 45.0, shock: 0, tilt: 0, flipped: 0, event: 'NONE', note: 'Tech hub dispatch: Sealed antistatic enclosure', dt: 2 },
@@ -141,16 +147,16 @@ function log(msg) {
 function sendRecord(record) {
   return new Promise((resolve, reject) => {
     const data = JSON.stringify(record);
-    const req = http.request({
-      hostname: 'localhost',
-      port: BACKEND_PORT,
+    const req = client.request({
+      hostname: targetUrlObj.hostname,
+      port: targetUrlObj.port || (isHttps ? 443 : 80),
       path: '/api/records',
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Content-Length': Buffer.byteLength(data)
       },
-      timeout: 5000
+      timeout: 10000
     }, (res) => {
       let body = '';
       res.on('data', chunk => body += chunk);
@@ -173,16 +179,16 @@ function sendRecord(record) {
 function resetBox(boxId) {
   return new Promise((resolve) => {
     const data = JSON.stringify({ confirm: true });
-    const req = http.request({
-      hostname: 'localhost',
-      port: BACKEND_PORT,
+    const req = client.request({
+      hostname: targetUrlObj.hostname,
+      port: targetUrlObj.port || (isHttps ? 443 : 80),
       path: `/api/admin/reset/${encodeURIComponent(boxId)}`,
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
         'Content-Length': Buffer.byteLength(data)
       },
-      timeout: 3000
+      timeout: 10000
     }, (res) => resolve(res.statusCode === 200));
     req.on('error', () => resolve(false));
     req.write(data);
@@ -192,12 +198,12 @@ function resetBox(boxId) {
 
 function fetchClaims(boxId) {
   return new Promise((resolve) => {
-    const req = http.request({
-      hostname: 'localhost',
-      port: BACKEND_PORT,
+    const req = client.request({
+      hostname: targetUrlObj.hostname,
+      port: targetUrlObj.port || (isHttps ? 443 : 80),
       path: `/api/claims/${encodeURIComponent(boxId)}`,
       method: 'GET',
-      timeout: 3000
+      timeout: 10000
     }, (res) => {
       let body = '';
       res.on('data', chunk => body += chunk);
@@ -212,12 +218,12 @@ function fetchClaims(boxId) {
 
 function fetchPayouts(boxId) {
   return new Promise((resolve) => {
-    const req = http.request({
-      hostname: 'localhost',
-      port: BACKEND_PORT,
+    const req = client.request({
+      hostname: targetUrlObj.hostname,
+      port: targetUrlObj.port || (isHttps ? 443 : 80),
       path: `/api/payouts/${encodeURIComponent(boxId)}`,
       method: 'GET',
-      timeout: 3000
+      timeout: 10000
     }, (res) => {
       let body = '';
       res.on('data', chunk => body += chunk);
@@ -232,12 +238,12 @@ function fetchPayouts(boxId) {
 
 function fetchVerify(boxId) {
   return new Promise((resolve) => {
-    const req = http.request({
-      hostname: 'localhost',
-      port: BACKEND_PORT,
+    const req = client.request({
+      hostname: targetUrlObj.hostname,
+      port: targetUrlObj.port || (isHttps ? 443 : 80),
       path: `/api/verify/${encodeURIComponent(boxId)}`,
       method: 'GET',
-      timeout: 3000
+      timeout: 10000
     }, (res) => {
       let body = '';
       res.on('data', chunk => body += chunk);
@@ -309,8 +315,8 @@ async function simulateItem(item) {
   const verify = await fetchVerify(item.boxId);
 
   const isReturned = claims.length > 0;
-  const actualOutcome = isReturned ? (item.expectedOutcome.includes('CANCEL') ? 'DELIVERY CANCELLED' : 'NOT DELIVERED') : 'DELIVERED';
-  const testPassed = isReturned ? (item.expectedOutcome === 'NOT DELIVERED' || item.expectedOutcome === 'DELIVERY CANCELLED') : (item.expectedOutcome === 'DELIVERED');
+  const actualOutcome = isReturned ? 'RETURNED' : 'DELIVERED';
+  const testPassed = isReturned ? (item.expectedOutcome === 'RETURNED' || item.expectedOutcome === 'NOT DELIVERED' || item.expectedOutcome === 'DELIVERY CANCELLED') : (item.expectedOutcome === 'DELIVERED');
   const totalPayout = payouts.reduce((sum, p) => sum + (p.amount_inr || 0), 0);
 
   console.log('\n' + '─'.repeat(70));
@@ -370,7 +376,7 @@ async function main() {
   console.log('█'.repeat(70));
   results.forEach(r => {
     const mark = r.testPassed ? '✅ PASS' : '❌ FAIL';
-    const statusLabel = (r.actualOutcome === 'DELIVERY CANCELLED' || r.actualOutcome === 'NOT DELIVERED') ? `❌ ${r.actualOutcome}` : '📦 DELIVERED';
+    const statusLabel = r.actualOutcome === 'RETURNED' ? '❌ RETURNED' : '📦 DELIVERED';
     console.log(`  ${mark} | ${r.boxId.padEnd(14)} | ${r.item.slice(0, 30).padEnd(30)} | ${statusLabel.padEnd(16)} | Payout: ₹${r.totalPayoutINR.toLocaleString()}`);
   });
   console.log('█'.repeat(70));
@@ -378,7 +384,7 @@ async function main() {
   // Save JSON
   const outputData = {
     simulationTimestamp: new Date().toISOString(),
-    backendUrl: `http://localhost:${BACKEND_PORT}`,
+    backendUrl: TARGET_URL,
     allTestsPassed: results.every(r => r.testPassed),
     results
   };
@@ -400,7 +406,7 @@ function generateMarkdownReport(results) {
 
   results.forEach(r => {
     const claimType = r.claims.length > 0 ? r.claims.map(c => c.type).join(' + ') : 'None (Safe)';
-    const outcome = (r.actualOutcome === 'DELIVERY CANCELLED' || r.actualOutcome === 'NOT DELIVERED') ? `❌ ${r.actualOutcome}` : '✅ DELIVERED';
+    const outcome = r.actualOutcome === 'RETURNED' ? '❌ RETURNED' : '✅ DELIVERED';
     const testStatus = r.testPassed ? '✅ PASS' : '❌ FAIL';
     md += `| ${r.item} | \`${r.boxId}\` | ${r.monitoredHazard} | ${claimType} | **${outcome}** | ₹${r.totalPayoutINR.toLocaleString()} | ${testStatus} |\n`;
   });

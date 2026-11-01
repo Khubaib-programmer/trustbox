@@ -342,49 +342,53 @@ export default function Dashboard() {
   let statusKeyword = "safe.";
   let statusTone = "safe";
 
-  if (isBroken) {
+  if (!latestRecord || records.length === 0) {
+    statusSentenceStart = `Box ${boxId} — `;
+    statusKeyword = "Awaiting Initial Readings.";
+    statusTone = "safe";
+  } else if (isBroken) {
     statusSentenceStart = "Security Breach — ";
-    statusKeyword = "DELIVERY CANCELLED (Records Tampered).";
+    statusKeyword = "RETURNED (Records Tampered).";
     statusTone = "danger";
   } else if (upperBox.startsWith('CAKE') && (isTempBreach || isDrop)) {
     statusSentenceStart = "Cake Melted & Spoiled — ";
-    statusKeyword = "DELIVERY CANCELLED (Extreme Heat & Pothole Shock).";
+    statusKeyword = "RETURNED (Extreme Heat & Pothole Shock).";
     statusTone = "danger";
   } else if (upperBox.startsWith('TV') && (isDrop || isHumidityBreach || isTilt)) {
     statusSentenceStart = "OLED TV Shattered — ";
-    statusKeyword = "DELIVERY CANCELLED (Violent High-G Drop Shock).";
+    statusKeyword = "RETURNED (Violent Drop Shock & Moisture).";
     statusTone = "danger";
   } else if (upperBox.startsWith('VACCINE') && (isTempBreach || isDrop)) {
     statusSentenceStart = "Critical Vaccine Failure — ";
-    statusKeyword = "DELIVERY CANCELLED (Cold-Chain Broken).";
+    statusKeyword = "RETURNED (Cold-Chain Broken).";
     statusTone = "danger";
   } else if (upperBox.startsWith('FRAGILE') && (isTilt || isDrop)) {
     statusSentenceStart = "Fragile Glassware Shattered — ";
-    statusKeyword = "DELIVERY CANCELLED (Impact / Inversion).";
+    statusKeyword = "RETURNED (Impact / Inverted Upside Down).";
     statusTone = "danger";
   } else if (upperBox.startsWith('ELECTRONIC') && (isDrop || isHumidityBreach)) {
     statusSentenceStart = "Hardware Compromised — ";
-    statusKeyword = "DELIVERY CANCELLED (Component Shock & Moisture).";
+    statusKeyword = "RETURNED (Component Shock & Moisture).";
     statusTone = "danger";
   } else if (isDrop && isTempBreach) {
     statusSentenceStart = "High Risk Damage — ";
-    statusKeyword = "DELIVERY CANCELLED (Shock Impact & Melted).";
+    statusKeyword = "RETURNED (Shock Impact & Melted).";
     statusTone = "danger";
   } else if (isTempBreach) {
     statusSentenceStart = "High Risk Spoilage — ";
-    statusKeyword = "DELIVERY CANCELLED (Temperature Breached).";
+    statusKeyword = "RETURNED (Temperature Breached).";
     statusTone = "danger";
   } else if (isHumidityBreach) {
     statusSentenceStart = "High Risk Damage — ";
-    statusKeyword = "DELIVERY CANCELLED (Moisture Hazard).";
+    statusKeyword = "RETURNED (Moisture Hazard).";
     statusTone = "danger";
   } else if (isDrop) {
     statusSentenceStart = "High Risk Impact — ";
-    statusKeyword = "DELIVERY CANCELLED (Heavy Shock / Dropped).";
+    statusKeyword = "RETURNED (Heavy Shock / Dropped).";
     statusTone = "danger";
   } else if (isTilt) {
     statusSentenceStart = "Orientation Alert — ";
-    statusKeyword = "DELIVERY CANCELLED (Package Tipped Over).";
+    statusKeyword = "RETURNED (Package Tipped Over).";
     statusTone = "danger";
   } else if (isLidOpen) {
     statusSentenceStart = "Box lid was ";
@@ -613,13 +617,13 @@ export default function Dashboard() {
             <div className="max-w-xl">
               <div className="mb-3 flex items-center gap-2">
                 <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold tracking-wide uppercase shadow-sm ${
-                  isHighRisk ? 'bg-danger text-white' : 'bg-safe text-white'
+                  !latestRecord || records.length === 0 ? 'bg-slate-600 text-white' : isHighRisk ? 'bg-danger text-white' : 'bg-safe text-white'
                 }`}>
-                  {isHighRisk ? '❌ DELIVERY CANCELLED' : '✅ DELIVERED SAFELY'}
+                  {!latestRecord || records.length === 0 ? '⏳ AWAITING DATA' : isHighRisk ? '❌ RETURNED' : '✅ DELIVERED SAFELY'}
                 </span>
                 {isHighRisk && (
                   <span className="text-xs font-semibold text-danger uppercase tracking-wider">
-                    High Risk: Cargo Compromised
+                    High Risk: Cargo Compromised — Return to Sender
                   </span>
                 )}
               </div>

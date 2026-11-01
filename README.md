@@ -108,11 +108,11 @@ TrustBox has been rigorously tested across 6 specialized cargo categories with a
 
 | Cargo Class | Box ID | Monitored Hazards | Incident Occurred | Delivery Verdict | Insurance Settlement & Beneficiary |
 |---|---|---|---|---|---|
-| **💉 mRNA Vaccines** | `VACCINE-001` | Strict Cold Chain (2.0°C – 8.0°C) | Dry ice depleted; sustained 17.2°C (>8°C) for >15s | **❌ DELIVERY CANCELLED** *(High Risk: Spoiled Biologics)* | **₹1,50,000 INR** *(Serum Institute Logistics Ltd.)* |
-| **🎂 Designer Cake** | `CAKE-001` | Cold-chain ≤8°C & Drop Handling | Van pothole drop (>4.5G) + Severe heat breach (36.5°C sustained) | **❌ DELIVERY CANCELLED** *(High Risk: Smashed & Melted)* | **₹75,000 INR** *(₹50k Heat + ₹25k Shock — CakeCraft Ltd.)* |
-| **📺 OLED 4K Smart TV** | `TV-001` | High-G Drop Shock & Moisture | Multiple violent drops (>6.5G to 8.0G) + Roof leak (92.5% humidity) | **❌ DELIVERY CANCELLED** *(High Risk: Screen Shattered & Circuit Short)* | **₹75,000 INR** *(₹45k Shock + ₹30k Moisture — Sony Electronics)* |
-| **💎 Crystal Glassware** | `FRAGILE-001` | Upright Orientation (Tilt / Inversion) & Shock | Package tilted >65° & flipped upside down on sorting chute | **❌ DELIVERY CANCELLED** *(High Risk: Stemware Shattered)* | **₹70,000 INR** *(₹35k Inversion + ₹35k Shock — Bohemia Crystal)* |
-| **💻 Gaming Laptop** | `ELECTRONIC-001` | Mechanical Shock (>5G) & Moisture | 1.5m courier drop shock impact (>5G detected) | **❌ DELIVERY CANCELLED** *(High Risk: Motherboard Micro-Crack)* | **₹45,000 INR** *(Dell Global Logistics Corp.)* |
+| **💉 mRNA Vaccines** | `VACCINE-001` | Strict Cold Chain (2.0°C – 8.0°C) | Dry ice depleted; sustained 17.2°C (>8°C) for >15s | **❌ RETURNED** *(High Risk: Spoiled Biologics)* | **₹1,50,000 INR** *(Serum Institute Logistics Ltd.)* |
+| **🎂 Designer Cake** | `CAKE-001` | Cold-chain ≤8°C & Drop Handling | Van pothole drop (>4.5G) + Severe heat breach (36.5°C sustained) | **❌ RETURNED** *(High Risk: Smashed & Melted)* | **₹75,000 INR** *(₹50k Heat + ₹25k Shock — CakeCraft Ltd.)* |
+| **📺 OLED 4K Smart TV** | `TV-001` | High-G Drop Shock & Moisture | Multiple violent drops (>6.5G to 8.0G) + Roof leak (92.5% humidity) | **❌ RETURNED** *(High Risk: Screen Shattered & Circuit Short)* | **₹75,000 INR** *(₹45k Shock + ₹30k Moisture — Sony Electronics)* |
+| **💎 Crystal Glassware** | `FRAGILE-001` | Upright Orientation (Tilt / Inversion) & Shock | Package tilted >65° & flipped upside down on sorting chute | **❌ RETURNED** *(High Risk: Stemware Shattered)* | **₹70,000 INR** *(₹35k Inversion + ₹35k Shock — Bohemia Crystal)* |
+| **💻 Gaming Laptop** | `ELECTRONIC-001` | Mechanical Shock (>5G) & Moisture | 1.5m courier drop shock impact (>5G detected) | **❌ RETURNED** *(High Risk: Motherboard Micro-Crack)* | **₹45,000 INR** *(Dell Global Logistics Corp.)* |
 | **📚 Medical Encyclopedias** | `BOOKS-001` | Standard Cargo (Control Baseline) | Safe transit (22°C, 48% Humidity, 0G Shock, Upright) | **✅ DELIVERED SAFELY** *(Zero Claims Triggered)* | **₹0 INR** *(Clean Delivery Proof)* |
 
 > Test outputs and verifiable cryptographic proofs are automatically saved to [`backend/simulation-results.json`](./backend/simulation-results.json) and [`backend/simulation-report.md`](./backend/simulation-report.md).
