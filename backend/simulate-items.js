@@ -48,34 +48,34 @@ const ITEMS = [
     name: '🎂 Designer 3-Tier Cream Cake (Perishable Confectionery)',
     category: 'Perishable & Fragile Bakery',
     monitoredHazard: 'Cold Chain (≤ 8°C) & Mechanical Vibration',
-    description: 'Van hits a major roadway pothole (SW-420 > 4.5G drop), cracking the refrigeration seal and melting cream decorations.',
-    expectedOutcome: 'NOT DELIVERED',
+    description: 'Van hits a major roadway pothole (SW-420 > 4.5G drop), cracking refrigeration seal. Temperature surges to 36.5°C in direct heat, melting cream.',
+    expectedOutcome: 'DELIVERY CANCELLED',
     expectedClaimType: 'DROP & TEMP_BREACH',
     records: [
       { temp_c: 4.8, humidity: 55.0, shock: 0, tilt: 0, flipped: 0, event: 'NONE', note: 'Bakery dispatch: Chilled display box (4.8°C, 0G shock)', dt: 2 },
       { temp_c: 5.1, humidity: 54.5, shock: 0, tilt: 0, flipped: 0, event: 'NONE', note: 'Suburban transit: Smooth driving, stable temperature', dt: 2 },
       { temp_c: 5.0, humidity: 56.0, shock: 0, tilt: 0, flipped: 0, event: 'NONE', note: 'City approach: Temperature holding steady (5.0°C)', dt: 2 },
-      // Severe drop pothole impact
-      { temp_c: 14.2, humidity: 60.0, shock: 1, tilt: 0, flipped: 0, event: 'DROP', note: '💥 SEVERE POTHOLE IMPACT (SW-420 > 4.5G)! Cake dropped off rack, cooler cracked!', dt: 2 },
-      { temp_c: 15.5, humidity: 62.0, shock: 1, tilt: 0, flipped: 0, event: 'DROP', note: '💥 Secondary shock impact! Internal cream structural collapse', dt: 8 },
-      { temp_c: 16.5, humidity: 65.0, shock: 1, tilt: 0, flipped: 0, event: 'TEMP_BREACH', note: '🚨 Sustained heat breach (16.5°C for 17s) + physical impact -> HIGH RISK: NOT DELIVERED!', dt: 9 }
+      // Severe drop pothole impact + soaring heat (36.5°C)
+      { temp_c: 24.5, humidity: 62.0, shock: 1, tilt: 0, flipped: 0, event: 'DROP', note: '💥 SEVERE POTHOLE IMPACT (SW-420 > 4.5G)! Cake dropped off rack, cooler cracked!', dt: 2 },
+      { temp_c: 31.8, humidity: 65.0, shock: 1, tilt: 0, flipped: 0, event: 'TEMP_BREACH', note: '⚠️ Cooling failure! Temp surging rapidly to 31.8°C under direct heat (> 8.0°C limit)', dt: 8 },
+      { temp_c: 36.5, humidity: 68.0, shock: 1, tilt: 0, flipped: 0, event: 'TEMP_BREACH', note: '🚨 Sustained extreme heat (36.5°C) + shock damage! Cream liquefied. DELIVERY CANCELLED!', dt: 9 }
     ]
   },
   {
     boxId: 'TV-001',
     name: '📺 55" 4K OLED Smart TV (High-End Electronics)',
     category: 'Fragile Glass & Precision Circuitry',
-    monitoredHazard: 'Moisture (≤ 70% Humidity) & Drop Shock',
-    description: 'Cargo truck container develops roof leak during monsoon storm (88% humidity) followed by sudden deceleration impact.',
-    expectedOutcome: 'NOT DELIVERED',
-    expectedClaimType: 'HUMIDITY_BREACH & DROP',
+    monitoredHazard: 'High-G Drop Shock & Moisture (≤ 70% Humidity)',
+    description: 'Cargo truck container experiences violent drop impacts (>6.5G to 8.0G) off transport pallet, shattering OLED panel followed by roof leak.',
+    expectedOutcome: 'DELIVERY CANCELLED',
+    expectedClaimType: 'DROP & HUMIDITY_BREACH',
     records: [
       { temp_c: 22.0, humidity: 50.0, shock: 0, tilt: 0, flipped: 0, event: 'NONE', note: 'Sony Central Warehouse: Dispatched in sealed foam packaging', dt: 2 },
       { temp_c: 22.5, humidity: 52.0, shock: 0, tilt: 0, flipped: 0, event: 'NONE', note: 'Highway freight: Nominal air humidity (52%)', dt: 2 },
-      { temp_c: 23.0, humidity: 58.0, shock: 0, tilt: 0, flipped: 0, event: 'NONE', note: 'Monsoon rainstorm begins: Humidity rising inside truck', dt: 2 },
-      // Moisture breach + impact
-      { temp_c: 23.5, humidity: 88.0, shock: 0, tilt: 0, flipped: 0, event: 'HUMIDITY_BREACH', note: '🚨 Container roof leak! Humidity surges to 88% (> 70% threshold) -> Circuit short hazard!', dt: 2 },
-      { temp_c: 23.8, humidity: 89.5, shock: 1, tilt: 0, flipped: 0, event: 'DROP', note: '💥 Sudden brake collision! Box impacted cargo barrier (Shock: 1, OLED Panel Crack Risk)', dt: 2 }
+      // High-G multiple shock impacts
+      { temp_c: 23.0, humidity: 58.0, shock: 1, tilt: 0, flipped: 0, event: 'DROP', note: '💥 VIOLENT TRANSIT DROP (SW-420 > 6.5G Shock)! Box thrown off transport pallet during emergency brake!', dt: 2 },
+      { temp_c: 23.5, humidity: 88.0, shock: 1, tilt: 0, flipped: 0, event: 'DROP', note: '💥 CRITICAL REPEATED SHOCK IMPACT (>8.0G)! OLED display panel shattered against vehicle bulkhead! Moisture entering!', dt: 2 },
+      { temp_c: 23.8, humidity: 92.5, shock: 1, tilt: 0, flipped: 0, event: 'HUMIDITY_BREACH', note: '🚨 Severe high-G drop shock + moisture flood (92.5%)! Complete panel & board destruction. DELIVERY CANCELLED!', dt: 2 }
     ]
   },
   {
@@ -309,8 +309,8 @@ async function simulateItem(item) {
   const verify = await fetchVerify(item.boxId);
 
   const isReturned = claims.length > 0;
-  const actualOutcome = isReturned ? 'NOT DELIVERED' : 'DELIVERED';
-  const testPassed = actualOutcome === item.expectedOutcome;
+  const actualOutcome = isReturned ? (item.expectedOutcome.includes('CANCEL') ? 'DELIVERY CANCELLED' : 'NOT DELIVERED') : 'DELIVERED';
+  const testPassed = isReturned ? (item.expectedOutcome === 'NOT DELIVERED' || item.expectedOutcome === 'DELIVERY CANCELLED') : (item.expectedOutcome === 'DELIVERED');
   const totalPayout = payouts.reduce((sum, p) => sum + (p.amount_inr || 0), 0);
 
   console.log('\n' + '─'.repeat(70));
@@ -370,7 +370,7 @@ async function main() {
   console.log('█'.repeat(70));
   results.forEach(r => {
     const mark = r.testPassed ? '✅ PASS' : '❌ FAIL';
-    const statusLabel = r.actualOutcome === 'NOT DELIVERED' ? '❌ NOT DELIVERED' : '📦 DELIVERED';
+    const statusLabel = (r.actualOutcome === 'DELIVERY CANCELLED' || r.actualOutcome === 'NOT DELIVERED') ? `❌ ${r.actualOutcome}` : '📦 DELIVERED';
     console.log(`  ${mark} | ${r.boxId.padEnd(14)} | ${r.item.slice(0, 30).padEnd(30)} | ${statusLabel.padEnd(16)} | Payout: ₹${r.totalPayoutINR.toLocaleString()}`);
   });
   console.log('█'.repeat(70));
@@ -400,7 +400,7 @@ function generateMarkdownReport(results) {
 
   results.forEach(r => {
     const claimType = r.claims.length > 0 ? r.claims.map(c => c.type).join(' + ') : 'None (Safe)';
-    const outcome = r.actualOutcome === 'NOT DELIVERED' ? '❌ NOT DELIVERED' : '✅ DELIVERED';
+    const outcome = (r.actualOutcome === 'DELIVERY CANCELLED' || r.actualOutcome === 'NOT DELIVERED') ? `❌ ${r.actualOutcome}` : '✅ DELIVERED';
     const testStatus = r.testPassed ? '✅ PASS' : '❌ FAIL';
     md += `| ${r.item} | \`${r.boxId}\` | ${r.monitoredHazard} | ${claimType} | **${outcome}** | ₹${r.totalPayoutINR.toLocaleString()} | ${testStatus} |\n`;
   });

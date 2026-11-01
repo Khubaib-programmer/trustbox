@@ -1,5 +1,5 @@
 {
-  "simulationTimestamp": "2026-11-01T05:12:58.881Z",
+  "simulationTimestamp": "2026-11-01T05:52:28.938Z",
   "backendUrl": "http://localhost:4000",
   "allTestsPassed": true,
   "results": [
@@ -21,20 +21,20 @@
           "status": "APPROVED",
           "reason": "Critical Vaccine Cold-Chain Failure: Temperature 17.2°C exceeded 8.0°C for 17s. Active antigens neutralized. Payout auto-settled.",
           "triggerSeq": 5,
-          "ts": 1793509911,
-          "createdAt": "2026-11-01T05:12:29.889Z"
+          "ts": 1793512281,
+          "createdAt": "2026-11-01T05:51:59.985Z"
         }
       ],
       "payouts": [
         {
-          "payout_id": "pay_lpcqdjrs4do8",
+          "payout_id": "pay_tkreepq5ov34",
           "claim_id": "5",
           "box_id": "VACCINE-001",
           "amount_inr": 150000,
           "currency": "INR",
           "status": "TRANSFERRED",
           "beneficiary": "Serum Institute Logistics Ltd.",
-          "timestamp": "2026-11-01T05:12:29.889Z"
+          "timestamp": "2026-11-01T05:51:59.985Z"
         }
       ],
       "totalPayoutINR": 150000
@@ -44,52 +44,52 @@
       "item": "🎂 Designer 3-Tier Cream Cake (Perishable Confectionery)",
       "category": "Perishable & Fragile Bakery",
       "monitoredHazard": "Cold Chain (≤ 8°C) & Mechanical Vibration",
-      "description": "Van hits a major roadway pothole (SW-420 > 4.5G drop), cracking the refrigeration seal and melting cream decorations.",
+      "description": "Van hits a major roadway pothole (SW-420 > 4.5G drop), cracking refrigeration seal. Temperature surges to 36.5°C in direct heat, melting cream.",
       "recordsSent": 6,
       "chainVerified": true,
-      "actualOutcome": "NOT DELIVERED",
-      "expectedOutcome": "NOT DELIVERED",
+      "actualOutcome": "DELIVERY CANCELLED",
+      "expectedOutcome": "DELIVERY CANCELLED",
       "testPassed": true,
       "claims": [
         {
           "box_id": "CAKE-001",
           "type": "DROP",
           "status": "APPROVED",
-          "reason": "Violent van pothole impact: Cake structural collapse and side container damage.",
+          "reason": "Violent van pothole impact: Cake structural collapse and side container damage. Delivery cancelled.",
           "triggerSeq": 3,
-          "ts": 1793509900,
-          "createdAt": "2026-11-01T05:12:34.529Z"
+          "ts": 1793512270,
+          "createdAt": "2026-11-01T05:52:04.613Z"
         },
         {
           "box_id": "CAKE-001",
           "type": "TEMP_BREACH",
           "status": "APPROVED",
-          "reason": "Confectionery Cold-Chain Failure: Temperature reached 16.5°C for 17s. Icing and cream spoiled. Delivery rejected.",
+          "reason": "Severe Temperature Breach: Reached 36.5°C (> 8.0°C limit) for 17s. Cream melted and decorations liquefied. Delivery cancelled.",
           "triggerSeq": 5,
-          "ts": 1793509917,
-          "createdAt": "2026-11-01T05:12:35.741Z"
+          "ts": 1793512287,
+          "createdAt": "2026-11-01T05:52:05.822Z"
         }
       ],
       "payouts": [
         {
-          "payout_id": "pay_trcbogjxqsg7",
+          "payout_id": "pay_rq2r8xarx0pq",
           "claim_id": "3",
           "box_id": "CAKE-001",
           "amount_inr": 25000,
           "currency": "INR",
           "status": "TRANSFERRED",
           "beneficiary": "CakeCraft Confectionery Ltd.",
-          "timestamp": "2026-11-01T05:12:34.529Z"
+          "timestamp": "2026-11-01T05:52:04.613Z"
         },
         {
-          "payout_id": "pay_emztxelrc9cz",
+          "payout_id": "pay_jq5ozi5xdjfb",
           "claim_id": "5",
           "box_id": "CAKE-001",
           "amount_inr": 50000,
           "currency": "INR",
           "status": "TRANSFERRED",
           "beneficiary": "CakeCraft Confectionery Ltd.",
-          "timestamp": "2026-11-01T05:12:35.741Z"
+          "timestamp": "2026-11-01T05:52:05.822Z"
         }
       ],
       "totalPayoutINR": 75000
@@ -98,56 +98,56 @@
       "boxId": "TV-001",
       "item": "📺 55\" 4K OLED Smart TV (High-End Electronics)",
       "category": "Fragile Glass & Precision Circuitry",
-      "monitoredHazard": "Moisture (≤ 70% Humidity) & Drop Shock",
-      "description": "Cargo truck container develops roof leak during monsoon storm (88% humidity) followed by sudden deceleration impact.",
+      "monitoredHazard": "High-G Drop Shock & Moisture (≤ 70% Humidity)",
+      "description": "Cargo truck container experiences violent drop impacts (>6.5G to 8.0G) off transport pallet, shattering OLED panel followed by roof leak.",
       "recordsSent": 5,
       "chainVerified": true,
-      "actualOutcome": "NOT DELIVERED",
-      "expectedOutcome": "NOT DELIVERED",
+      "actualOutcome": "DELIVERY CANCELLED",
+      "expectedOutcome": "DELIVERY CANCELLED",
       "testPassed": true,
       "claims": [
+        {
+          "box_id": "TV-001",
+          "type": "DROP",
+          "status": "APPROVED",
+          "reason": "Violent High-G Drop Impact Detected: OLED display panel shattered against cargo barrier. Delivery cancelled.",
+          "triggerSeq": 2,
+          "ts": 1793512274,
+          "createdAt": "2026-11-01T05:52:09.840Z"
+        },
         {
           "box_id": "TV-001",
           "type": "HUMIDITY_BREACH",
           "status": "APPROVED",
           "reason": "High humidity breach detected: 88% (Threshold: 70%) - Circuit Short Risk, Returned",
           "triggerSeq": 3,
-          "ts": 1793509906,
-          "createdAt": "2026-11-01T05:12:40.372Z"
-        },
-        {
-          "box_id": "TV-001",
-          "type": "DROP",
-          "status": "APPROVED",
-          "reason": "Heavy shock impact detected: OLED panel shatter and internal ribbon cable displacement risk.",
-          "triggerSeq": 4,
-          "ts": 1793509908,
-          "createdAt": "2026-11-01T05:12:40.978Z"
+          "ts": 1793512276,
+          "createdAt": "2026-11-01T05:52:10.443Z"
         }
       ],
       "payouts": [
         {
-          "payout_id": "pay_b0v0e47f2y1f",
+          "payout_id": "pay_hvb5giz8y3og",
+          "claim_id": "2",
+          "box_id": "TV-001",
+          "amount_inr": 45000,
+          "currency": "INR",
+          "status": "TRANSFERRED",
+          "beneficiary": "Sony Electronics Logistics Ltd.",
+          "timestamp": "2026-11-01T05:52:09.840Z"
+        },
+        {
+          "payout_id": "pay_tmsdmnas8u7g",
           "claim_id": "3",
           "box_id": "TV-001",
           "amount_inr": 30000,
           "currency": "INR",
           "status": "TRANSFERRED",
           "beneficiary": "Sony Electronics Logistics Ltd.",
-          "timestamp": "2026-11-01T05:12:40.372Z"
-        },
-        {
-          "payout_id": "pay_fml6ld3700y5",
-          "claim_id": "4",
-          "box_id": "TV-001",
-          "amount_inr": 40000,
-          "currency": "INR",
-          "status": "TRANSFERRED",
-          "beneficiary": "Sony Electronics Logistics Ltd.",
-          "timestamp": "2026-11-01T05:12:40.978Z"
+          "timestamp": "2026-11-01T05:52:10.443Z"
         }
       ],
-      "totalPayoutINR": 70000
+      "totalPayoutINR": 75000
     },
     {
       "boxId": "FRAGILE-001",
@@ -167,8 +167,8 @@
           "status": "APPROVED",
           "reason": "Fragile cargo tipped / inverted (Tilt/Flipped: 1) - 'THIS SIDE UP' violation, Glassware shattered.",
           "triggerSeq": 2,
-          "ts": 1793509909,
-          "createdAt": "2026-11-01T05:12:45.003Z"
+          "ts": 1793512279,
+          "createdAt": "2026-11-01T05:52:15.065Z"
         },
         {
           "box_id": "FRAGILE-001",
@@ -176,30 +176,30 @@
           "status": "APPROVED",
           "reason": "Drop shock detected: Ultra-fragile glassware shattered in transit.",
           "triggerSeq": 3,
-          "ts": 1793509911,
-          "createdAt": "2026-11-01T05:12:45.607Z"
+          "ts": 1793512281,
+          "createdAt": "2026-11-01T05:52:15.669Z"
         }
       ],
       "payouts": [
         {
-          "payout_id": "pay_pwbkd9np1xx4",
+          "payout_id": "pay_kqmo9p1xsb7b",
           "claim_id": "2",
           "box_id": "FRAGILE-001",
           "amount_inr": 35000,
           "currency": "INR",
           "status": "TRANSFERRED",
           "beneficiary": "Bohemia Crystal Imports Ltd.",
-          "timestamp": "2026-11-01T05:12:45.003Z"
+          "timestamp": "2026-11-01T05:52:15.065Z"
         },
         {
-          "payout_id": "pay_4g2caz14cjc8",
+          "payout_id": "pay_rqf1xuvmk0kg",
           "claim_id": "3",
           "box_id": "FRAGILE-001",
           "amount_inr": 35000,
           "currency": "INR",
           "status": "TRANSFERRED",
           "beneficiary": "Bohemia Crystal Imports Ltd.",
-          "timestamp": "2026-11-01T05:12:45.607Z"
+          "timestamp": "2026-11-01T05:52:15.669Z"
         }
       ],
       "totalPayoutINR": 70000
@@ -222,20 +222,20 @@
           "status": "APPROVED",
           "reason": "Severe mechanical shock (>5G): Motherboard micro-trace crack hazard detected.",
           "triggerSeq": 3,
-          "ts": 1793509916,
-          "createdAt": "2026-11-01T05:12:50.236Z"
+          "ts": 1793512286,
+          "createdAt": "2026-11-01T05:52:20.295Z"
         }
       ],
       "payouts": [
         {
-          "payout_id": "pay_ne852xpl849b",
+          "payout_id": "pay_8k2deh92ocgq",
           "claim_id": "3",
           "box_id": "ELECTRONIC-001",
           "amount_inr": 45000,
           "currency": "INR",
           "status": "TRANSFERRED",
           "beneficiary": "Dell Global Logistics Corp.",
-          "timestamp": "2026-11-01T05:12:50.236Z"
+          "timestamp": "2026-11-01T05:52:20.295Z"
         }
       ],
       "totalPayoutINR": 45000

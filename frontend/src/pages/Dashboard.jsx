@@ -344,43 +344,47 @@ export default function Dashboard() {
 
   if (isBroken) {
     statusSentenceStart = "Security Breach — ";
-    statusKeyword = "NOT DELIVERED (Records Tampered).";
+    statusKeyword = "DELIVERY CANCELLED (Records Tampered).";
+    statusTone = "danger";
+  } else if (upperBox.startsWith('CAKE') && (isTempBreach || isDrop)) {
+    statusSentenceStart = "Cake Melted & Spoiled — ";
+    statusKeyword = "DELIVERY CANCELLED (Extreme Heat & Pothole Shock).";
+    statusTone = "danger";
+  } else if (upperBox.startsWith('TV') && (isDrop || isHumidityBreach || isTilt)) {
+    statusSentenceStart = "OLED TV Shattered — ";
+    statusKeyword = "DELIVERY CANCELLED (Violent High-G Drop Shock).";
     statusTone = "danger";
   } else if (upperBox.startsWith('VACCINE') && (isTempBreach || isDrop)) {
     statusSentenceStart = "Critical Vaccine Failure — ";
-    statusKeyword = "NOT DELIVERED (Cold-Chain Broken).";
+    statusKeyword = "DELIVERY CANCELLED (Cold-Chain Broken).";
     statusTone = "danger";
   } else if (upperBox.startsWith('FRAGILE') && (isTilt || isDrop)) {
     statusSentenceStart = "Fragile Glassware Shattered — ";
-    statusKeyword = "NOT DELIVERED (Impact / Inversion).";
-    statusTone = "danger";
-  } else if (upperBox.startsWith('TV') && (isDrop || isHumidityBreach || isTilt)) {
-    statusSentenceStart = "OLED TV Damaged — ";
-    statusKeyword = "NOT DELIVERED (Shock & Moisture Hazard).";
+    statusKeyword = "DELIVERY CANCELLED (Impact / Inversion).";
     statusTone = "danger";
   } else if (upperBox.startsWith('ELECTRONIC') && (isDrop || isHumidityBreach)) {
     statusSentenceStart = "Hardware Compromised — ";
-    statusKeyword = "NOT DELIVERED (Component Shock & Moisture).";
+    statusKeyword = "DELIVERY CANCELLED (Component Shock & Moisture).";
     statusTone = "danger";
   } else if (isDrop && isTempBreach) {
     statusSentenceStart = "High Risk Damage — ";
-    statusKeyword = "NOT DELIVERED (Shock Impact & Melted).";
+    statusKeyword = "DELIVERY CANCELLED (Shock Impact & Melted).";
     statusTone = "danger";
   } else if (isTempBreach) {
     statusSentenceStart = "High Risk Spoilage — ";
-    statusKeyword = "NOT DELIVERED (Temperature Breached).";
+    statusKeyword = "DELIVERY CANCELLED (Temperature Breached).";
     statusTone = "danger";
   } else if (isHumidityBreach) {
     statusSentenceStart = "High Risk Damage — ";
-    statusKeyword = "NOT DELIVERED (Moisture Hazard).";
+    statusKeyword = "DELIVERY CANCELLED (Moisture Hazard).";
     statusTone = "danger";
   } else if (isDrop) {
     statusSentenceStart = "High Risk Impact — ";
-    statusKeyword = "NOT DELIVERED (Heavy Shock / Dropped).";
+    statusKeyword = "DELIVERY CANCELLED (Heavy Shock / Dropped).";
     statusTone = "danger";
   } else if (isTilt) {
     statusSentenceStart = "Orientation Alert — ";
-    statusKeyword = "NOT DELIVERED (Package Tipped Over).";
+    statusKeyword = "DELIVERY CANCELLED (Package Tipped Over).";
     statusTone = "danger";
   } else if (isLidOpen) {
     statusSentenceStart = "Box lid was ";
@@ -611,7 +615,7 @@ export default function Dashboard() {
                 <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold tracking-wide uppercase shadow-sm ${
                   isHighRisk ? 'bg-danger text-white' : 'bg-safe text-white'
                 }`}>
-                  {isHighRisk ? '❌ NOT DELIVERED' : '✅ DELIVERED SAFELY'}
+                  {isHighRisk ? '❌ DELIVERY CANCELLED' : '✅ DELIVERED SAFELY'}
                 </span>
                 {isHighRisk && (
                   <span className="text-xs font-semibold text-danger uppercase tracking-wider">

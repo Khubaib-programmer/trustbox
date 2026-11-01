@@ -59,9 +59,9 @@ class InsuranceEngine {
           beneficiary = 'Serum Institute Logistics Ltd.';
           reason = `Violent impact drop detected (>4.5G): High risk of vial micro-fractures and vaccine degradation.`;
         } else if (upperBox.startsWith('TV')) {
-          amount_inr = 40000;
+          amount_inr = 45000;
           beneficiary = 'Sony Electronics Logistics Ltd.';
-          reason = `Heavy shock impact detected: OLED panel shatter and internal ribbon cable displacement risk.`;
+          reason = `Violent High-G Drop Impact Detected: OLED display panel shattered against cargo barrier. Delivery cancelled.`;
         } else if (upperBox.startsWith('FRAGILE') || upperBox.startsWith('GLASS')) {
           amount_inr = 35000;
           beneficiary = 'Bohemia Crystal Imports Ltd.';
@@ -73,7 +73,7 @@ class InsuranceEngine {
         } else if (upperBox.startsWith('CAKE')) {
           amount_inr = 25000;
           beneficiary = 'CakeCraft Confectionery Ltd.';
-          reason = `Violent van pothole impact: Cake structural collapse and side container damage.`;
+          reason = `Violent van pothole impact: Cake structural collapse and side container damage. Delivery cancelled.`;
         }
 
         const claimData = {
@@ -155,7 +155,7 @@ class InsuranceEngine {
           } else if (upperBox.startsWith('CAKE')) {
             amount_inr = 50000;
             beneficiary = 'CakeCraft Confectionery Ltd.';
-            reason = `Confectionery Cold-Chain Failure: Temperature reached ${record.temp_c}°C for ${elapsedSec}s. Icing and cream spoiled. Delivery rejected.`;
+            reason = `Severe Temperature Breach: Reached ${record.temp_c}°C (> 8.0°C limit) for ${elapsedSec}s. Cream melted and decorations liquefied. Delivery cancelled.`;
           }
 
           const claimData = {
