@@ -19,7 +19,8 @@ class InsuranceEngine {
       this.boxState.set(boxId, {
         tempExceedStartTs: null,
         hasTempClaim: false,
-        hasDropClaim: false
+        hasDropClaim: false,
+        hasHumidityClaim: false
       });
     }
     return this.boxState.get(boxId);
