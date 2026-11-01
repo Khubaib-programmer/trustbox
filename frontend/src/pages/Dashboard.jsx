@@ -37,8 +37,16 @@ import Skeleton from '../components/Skeleton';
 import { API_BASE_URL, SOCKET_URL } from '../config';
 
 export default function Dashboard() {
-  const [boxId, setBoxId] = useState('TB-001');
-  const [availableBoxes, setAvailableBoxes] = useState(['TB-001', 'TB-DEMO-01', 'TB-TEST']);
+  const [boxId, setBoxId] = useState('VACCINE-001');
+  const [availableBoxes, setAvailableBoxes] = useState([
+    'VACCINE-001',
+    'CAKE-001',
+    'TV-001',
+    'FRAGILE-001',
+    'ELECTRONIC-001',
+    'BOOKS-001',
+    'TB-001'
+  ]);
   const [isDeviceMenuOpen, setIsDeviceMenuOpen] = useState(false);
   const [customInputBox, setCustomInputBox] = useState('');
   const [isConnected, setIsConnected] = useState(false);
@@ -319,13 +327,16 @@ export default function Dashboard() {
   };
 
   // Status computation
+  const upperBox = (boxId || '').toUpperCase();
   const isBroken = chainVerify && chainVerify.ok === false;
   const isDrop = latestRecord?.event === 'DROP' || latestRecord?.shock === 1;
-  const isTempBreach = latestRecord?.event === 'TEMP_BREACH' || (latestRecord?.box_id?.startsWith('CAKE') && latestRecord?.temp_c > 8.0);
-  const isHumidityBreach = latestRecord?.event === 'HUMIDITY_BREACH' || (latestRecord?.humidity > 75.0 && latestRecord?.box_id?.startsWith('TV'));
+  const isColdChain = upperBox.startsWith('VACCINE') || upperBox.startsWith('CAKE') || upperBox.startsWith('TB');
+  const isTempBreach = latestRecord?.event === 'TEMP_BREACH' || (isColdChain && latestRecord?.temp_c > 8.0);
+  const isHumidityBreach = latestRecord?.event === 'HUMIDITY_BREACH' || ((upperBox.startsWith('TV') || upperBox.startsWith('ELECTRONIC')) && latestRecord?.humidity > 70.0);
   const isLidOpen = latestRecord?.event === 'LID_OPEN' || latestRecord?.lid_open === 1;
   const isFlipped = latestRecord?.event === 'FLIPPED' || latestRecord?.flipped === 1;
-  const isHighRisk = isDrop || isTempBreach || isHumidityBreach || isBroken || claims.length > 0;
+  const isTilt = latestRecord?.event === 'TILT' || latestRecord?.tilt === 1 || isFlipped;
+  const isHighRisk = isDrop || isTempBreach || isHumidityBreach || isTilt || isBroken || claims.length > 0;
 
   let statusSentenceStart = "Your delivery is ";
   let statusKeyword = "safe.";
@@ -334,6 +345,22 @@ export default function Dashboard() {
   if (isBroken) {
     statusSentenceStart = "Security Breach — ";
     statusKeyword = "NOT DELIVERED (Records Tampered).";
+    statusTone = "danger";
+  } else if (upperBox.startsWith('VACCINE') && (isTempBreach || isDrop)) {
+    statusSentenceStart = "Critical Vaccine Failure — ";
+    statusKeyword = "NOT DELIVERED (Cold-Chain Broken).";
+    statusTone = "danger";
+  } else if (upperBox.startsWith('FRAGILE') && (isTilt || isDrop)) {
+    statusSentenceStart = "Fragile Glassware Shattered — ";
+    statusKeyword = "NOT DELIVERED (Impact / Inversion).";
+    statusTone = "danger";
+  } else if (upperBox.startsWith('TV') && (isDrop || isHumidityBreach || isTilt)) {
+    statusSentenceStart = "OLED TV Damaged — ";
+    statusKeyword = "NOT DELIVERED (Shock & Moisture Hazard).";
+    statusTone = "danger";
+  } else if (upperBox.startsWith('ELECTRONIC') && (isDrop || isHumidityBreach)) {
+    statusSentenceStart = "Hardware Compromised — ";
+    statusKeyword = "NOT DELIVERED (Component Shock & Moisture).";
     statusTone = "danger";
   } else if (isDrop && isTempBreach) {
     statusSentenceStart = "High Risk Damage — ";
@@ -351,13 +378,13 @@ export default function Dashboard() {
     statusSentenceStart = "High Risk Impact — ";
     statusKeyword = "NOT DELIVERED (Heavy Shock / Dropped).";
     statusTone = "danger";
+  } else if (isTilt) {
+    statusSentenceStart = "Orientation Alert — ";
+    statusKeyword = "NOT DELIVERED (Package Tipped Over).";
+    statusTone = "danger";
   } else if (isLidOpen) {
     statusSentenceStart = "Box lid was ";
     statusKeyword = "opened.";
-    statusTone = "warning";
-  } else if (isFlipped) {
-    statusSentenceStart = "Package was ";
-    statusKeyword = "flipped.";
     statusTone = "warning";
   }
 
@@ -386,12 +413,13 @@ export default function Dashboard() {
 
   const getEventTitle = (event) => {
     switch (event) {
-      case 'DROP': return 'Package dropped';
-      case 'TEMP_BREACH': return 'Temperature went above limit';
-      case 'HUMIDITY_BREACH': return 'Humidity exceeded limit (Damage risk)';
-      case 'LID_OPEN': return 'Lid was opened';
-      case 'FLIPPED': return 'Package was flipped';
-      default: return 'Everything normal';
+      case 'DROP': return 'Package dropped / Impact shock';
+      case 'TEMP_BREACH': return 'Cold-chain temperature breached';
+      case 'HUMIDITY_BREACH': return 'Moisture exceeded limit (Circuit risk)';
+      case 'TILT': return 'Package tilted over 60° (Fragile hazard)';
+      case 'FLIPPED': return 'Package was inverted / flipped upside down';
+      case 'LID_OPEN': return 'Lid was opened / seal breached';
+      default: return 'Normal transit reading';
     }
   };
 

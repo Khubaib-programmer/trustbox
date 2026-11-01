@@ -3,11 +3,21 @@
 > **A hardware-integrated, cryptographically secured IoT delivery monitoring and instant parametric insurance platform.**
 
 [![HackCulture Submission](https://img.shields.io/badge/HackCulture-Hackathon%20Submission-FF3B30?style=for-the-badge&logo=target)](https://github.com/Khubaib-programmer/trustbox)
+[![Live Frontend](https://img.shields.io/badge/Vercel-Live%20Frontend%20App-000000?style=for-the-badge&logo=vercel)](https://frontend-nine-lac-9i1472sb0c.vercel.app/)
+[![Live Backend](https://img.shields.io/badge/Backend-Vercel%20API-0070F3?style=for-the-badge&logo=vercel)](https://trustbox-nine.vercel.app/)
 [![Repository](https://img.shields.io/badge/GitHub-Repo-181717?style=for-the-badge&logo=github)](https://github.com/Khubaib-programmer/trustbox)
 [![Node.js](https://img.shields.io/badge/Node.js-v20+-339933?style=for-the-badge&logo=node.js)](https://nodejs.org/)
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=for-the-badge&logo=react)](https://react.dev/)
-[![MQTT](https://img.shields.io/badge/MQTT-Mosquitto-660066?style=for-the-badge&logo=eclipsemosquitto)](https://mosquitto.org/)
 [![Database](https://img.shields.io/badge/MongoDB-Atlas%20Cloud-47A248?style=for-the-badge&logo=mongodb)](https://www.mongodb.com/atlas)
+
+---
+
+## 🌐 Live Deployed Application Links
+
+- 🖥️ **Live Web Dashboard:** [https://frontend-nine-lac-9i1472sb0c.vercel.app/](https://frontend-nine-lac-9i1472sb0c.vercel.app/)
+- ⚙️ **Production REST API:** [https://trustbox-nine.vercel.app/](https://trustbox-nine.vercel.app/)
+- 🔍 **Public QR Verification Audit Portal:** [https://frontend-nine-lac-9i1472sb0c.vercel.app/verify/VACCINE-001](https://frontend-nine-lac-9i1472sb0c.vercel.app/verify/VACCINE-001)
+- 📂 **GitHub Repository:** [https://github.com/Khubaib-programmer/trustbox](https://github.com/Khubaib-programmer/trustbox)
 
 ---
 
@@ -92,15 +102,18 @@ In modern logistics and high-value cargo transit (biologicals, vaccines, fresh c
 
 ---
 
-## 🧪 Real-World Test Cases & Scenarios (Verified)
+## 🧪 Real-World Test Cases & Pitching Scenarios (6 Verified Scenarios)
 
-TrustBox has been evaluated against three real-world product classes with automated proof-of-delivery logic:
+TrustBox has been rigorously tested across 6 specialized cargo categories with automated Proof-of-Delivery, risk mitigation, and instant parametric claim execution:
 
-| Item | Box ID | Monitored Hazards | Incident Occurred | Delivery Verdict | Insurance Settlement |
+| Cargo Class | Box ID | Monitored Hazards | Incident Occurred | Delivery Verdict | Insurance Settlement & Beneficiary |
 |---|---|---|---|---|---|
-| **🎂 Cream Cake** | `CAKE-001` | Cold-chain ≤8°C & Gentle Handling | Pothole drop (>4.5G) + Cooling failed (16.5°C sustained) | **❌ NOT DELIVERED** *(High Risk: Smashed & Melted)* | **₹75,000 INR** *(₹50k Heat + ₹25k Shock)* |
-| **📺 55" Smart TV** | `TV-001` | Moisture ≤75% Humidity | Rain leakage in transit van (88% humidity) | **❌ NOT DELIVERED** *(High Risk: Circuit Damage)* | **₹30,000 INR** *(Humidity Breach Claim)* |
-| **📚 Textbooks** | `BOOKS-001` | Standard Cargo | Safe transit (22°C, 48% Humidity, 0G Shock) | **✅ DELIVERED SAFELY** *(Zero Claims)* | **₹0 INR** *(Clean Delivery)* |
+| **💉 mRNA Vaccines** | `VACCINE-001` | Strict Cold Chain (2.0°C – 8.0°C) | Dry ice depleted; sustained 17.2°C (>8°C) for >15s | **❌ NOT DELIVERED** *(High Risk: Spoiled Biologics)* | **₹1,50,000 INR** *(Serum Institute Logistics Ltd.)* |
+| **🎂 Designer Cake** | `CAKE-001` | Cold-chain ≤8°C & Drop Handling | Van pothole drop (>4.5G) + Cooling cracked (16.5°C sustained) | **❌ NOT DELIVERED** *(High Risk: Smashed & Melted)* | **₹75,000 INR** *(₹50k Heat + ₹25k Shock — CakeCraft Ltd.)* |
+| **📺 OLED 4K Smart TV** | `TV-001` | Moisture ≤70% Humidity & Drop Shock | Truck roof leak (88% humidity) + Sudden brake impact (Shock: 1) | **❌ NOT DELIVERED** *(High Risk: Circuit Corrosion & Screen)* | **₹70,000 INR** *(₹40k Shock + ₹30k Moisture — Sony Electronics)* |
+| **💎 Crystal Glassware** | `FRAGILE-001` | Upright Orientation (Tilt / Inversion) & Shock | Package tilted >65° & flipped upside down on sorting chute | **❌ NOT DELIVERED** *(High Risk: Stemware Shattered)* | **₹70,000 INR** *(₹35k Inversion + ₹35k Shock — Bohemia Crystal)* |
+| **💻 Gaming Laptop** | `ELECTRONIC-001` | Mechanical Shock (>5G) & Moisture | 1.5m courier drop shock impact (>5G detected) | **❌ NOT DELIVERED** *(High Risk: Motherboard Micro-Crack)* | **₹45,000 INR** *(Dell Global Logistics Corp.)* |
+| **📚 Medical Encyclopedias** | `BOOKS-001` | Standard Cargo (Control Baseline) | Safe transit (22°C, 48% Humidity, 0G Shock, Upright) | **✅ DELIVERED SAFELY** *(Zero Claims Triggered)* | **₹0 INR** *(Clean Delivery Proof)* |
 
 > Test outputs and verifiable cryptographic proofs are automatically saved to [`backend/simulation-results.json`](./backend/simulation-results.json) and [`backend/simulation-report.md`](./backend/simulation-report.md).
 
@@ -161,7 +174,7 @@ Open **`http://localhost:3000`** in your browser.
 
 ## 🚀 Running Simulations
 
-Run the complete 3-item delivery simulation (Cake, TV, Books) with a single command:
+Run the complete 6-item delivery simulation (Vaccine, Cake, OLED TV, Crystal Glass, Laptop, Books) with a single command:
 ```bash
 cd backend
 npm run simulate:items

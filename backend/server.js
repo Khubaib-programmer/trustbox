@@ -1,5 +1,6 @@
-require('dotenv').config();
+const path = require('path');
 const fs = require('fs');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -219,17 +220,24 @@ function adaptIoTPayload(raw, topic = '') {
   // 5. Event derivation priority:
   // breach -> TEMP_BREACH, shock -> DROP, tilt or ball_switch -> FLIPPED, reed_triggered -> LID_OPEN, otherwise NONE
   let event = 'NONE';
+  const upperDevice = String(deviceId || '').toUpperCase();
   if (normalizeBool(raw.breach) === 1) {
-    event = 'TEMP_BREACH';
+    if (temp_c > CLAIM_TEMP_C) event = 'TEMP_BREACH';
+    else if (shock === 1) event = 'DROP';
+    else if (flipped === 1) event = 'FLIPPED';
+    else if (lid_open === 1) event = 'LID_OPEN';
+    else event = 'TEMP_BREACH'; // fallback
   } else if (shock === 1) {
     event = 'DROP';
-  } else if (tilt === 1 || ball_switch === 1 || flipped === 1) {
+  } else if (humidity > 70.0 && (upperDevice.startsWith('TV') || upperDevice.startsWith('ELECTRONIC'))) {
+    event = 'HUMIDITY_BREACH';
+  } else if (flipped === 1) {
     event = 'FLIPPED';
+  } else if (tilt === 1 || ball_switch === 1) {
+    event = 'TILT';
   } else if (lid_open === 1) {
     event = 'LID_OPEN';
   }
-
-  const boxId = String(raw.device_id || raw.box_id || 'ESP32-BOX').trim();
 
   return {
     valid: true,
@@ -633,11 +641,11 @@ app.post('/api/records', async (req, res) => {
   if (!result.success) {
     return res.status(result.status || 400).json({ error: result.error });
   }
-  res.status(201).json({ 
-    status: 'received', 
-    box_id: record.box_id, 
-    seq: record.seq, 
-    hash: record.hash 
+  res.status(201).json({
+    status: 'received',
+    box_id: record.box_id,
+    seq: record.seq,
+    hash: record.hash
   });
 });
 
@@ -735,7 +743,7 @@ app.post('/api/admin/tamper/:boxId/:seq', async (req, res) => {
     }
 
     console.log(`😈 [TAMPER SIMULATED] Maliciously altered temp_c for ${boxId} #${seqNum} to ${tamperedRecord.temp_c}`);
-    
+
     // Broadcast tamper event
     io.emit('tamper', { box_id: boxId, seq: seqNum, new_temp: tamperedRecord.temp_c });
 

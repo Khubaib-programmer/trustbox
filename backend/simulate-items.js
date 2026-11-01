@@ -1,73 +1,130 @@
 /**
- * TrustBox — 3-Item Delivery Simulation
- * =======================================
- * Item 1: CAKE  (Perishable)   → High Temp (>8°C)    → RETURNED ❌ + ₹50,000 Payout
- * Item 2: TV    (Electronics)  → High Humidity (>75%)→ RETURNED ❌ + ₹30,000 Payout
- * Item 3: BOOKS (Durable)      → Normal Safe Transit → DELIVERED ✅ (Zero Claims)
+ * TrustBox — Comprehensive Hackathon Pitching Test Suite
+ * =======================================================
+ * Demonstrates 6 Real-World Cargo Scenarios for Judges:
+ * 1. 💉 VACCINE-001    (Critical Biologics)   → Cold Chain Spoilage (>8°C)    → NOT DELIVERED ❌ (₹1,50,000 Payout)
+ * 2. 🎂 CAKE-001       (Perishable Bakery)    → Severe Drop + Heat Melt       → NOT DELIVERED ❌ (₹75,000 Payout)
+ * 3. 📺 TV-001         (Fragile OLED Display) → High Humidity + Screen Impact → NOT DELIVERED ❌ (₹70,000 Payout)
+ * 4. 💎 FRAGILE-001    (Luxury Crystal Glass) → Tilted / Inverted Upside Down → NOT DELIVERED ❌ (₹35,000 Payout)
+ * 5. 💻 ELECTRONIC-001 (Gaming Laptop)        → Violent Mechanical Drop Shock → NOT DELIVERED ❌ (₹45,000 Payout)
+ * 6. 📚 BOOKS-001      (Dry Goods - Baseline) → Normal Safe Delivery          → DELIVERED SAFELY ✅ (₹0 Claims)
  *
- * Runs sequentially and saves results to simulation-results.json & simulation-report.md
+ * Results saved to: simulation-results.json & simulation-report.md
  */
 
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 const http = require('http');
 const fs = require('fs');
 const { GENESIS_PREV_HASH, signRecord } = require('./chain');
 
 const DEVICE_KEY = process.env.DEVICE_KEY || 'trustbox-super-secret-key-32ch';
 const BACKEND_PORT = process.env.PORT || 4000;
-const INTERVAL_MS = 1000; // 1s between steps
+const INTERVAL_MS = 600; // Fast 600ms per step for snappy pitching demo
 const RESULTS_JSON = __dirname + '/simulation-results.json';
 const REPORT_MD = __dirname + '/simulation-report.md';
 
 const ITEMS = [
   {
+    boxId: 'VACCINE-001',
+    name: '💉 mRNA Polio/COVID Vaccine (Cold Chain Biologics)',
+    category: 'Critical Biological Vaccine',
+    monitoredHazard: 'Strict Cold Chain (2.0°C – 8.0°C)',
+    description: 'Dry ice packaging depletes midway in remote transit. Temperature exceeds 8°C for >15s, neutralizing active viral antigens.',
+    expectedOutcome: 'NOT DELIVERED',
+    expectedClaimType: 'TEMP_BREACH',
+    records: [
+      { temp_c: 4.2, humidity: 45.0, shock: 0, tilt: 0, flipped: 0, event: 'NONE', note: 'Central Pharma Depository: Dispatched in cryogenic cooler (4.2°C)', dt: 2 },
+      { temp_c: 4.8, humidity: 46.0, shock: 0, tilt: 0, flipped: 0, event: 'NONE', note: 'Regional Hub Transit: Thermal box intact (4.8°C)', dt: 2 },
+      { temp_c: 5.5, humidity: 48.0, shock: 0, tilt: 0, flipped: 0, event: 'NONE', note: 'Last-mile ambulance van: Insulation weakening (5.5°C)', dt: 2 },
+      // Thermal Breach begins
+      { temp_c: 12.8, humidity: 55.0, shock: 0, tilt: 0, flipped: 0, event: 'TEMP_BREACH', note: '⚠️ Dry ice exhausted! Temp spiked to 12.8°C (> 8.0°C limit)', dt: 2 },
+      { temp_c: 15.6, humidity: 58.0, shock: 0, tilt: 0, flipped: 0, event: 'TEMP_BREACH', note: '⚠️ Critical warning: Temperature sustained at 15.6°C for 8s', dt: 8 },
+      { temp_c: 17.2, humidity: 60.0, shock: 0, tilt: 0, flipped: 0, event: 'TEMP_BREACH', note: '🚨 Sustained thermal breach (>15s at 17.2°C)! Active antigens spoiled. Claim auto-settled!', dt: 9 }
+    ]
+  },
+  {
     boxId: 'CAKE-001',
-    name: '🎂 Cream Cake (Perishable Cold-Chain)',
-    category: 'Perishable Food',
-    description: 'Requires cold chain ≤ 8.0°C & gentle handling. Suffers multiple severe shock impacts (SW-420 > 4G) + cooler failure (16°C).',
+    name: '🎂 Designer 3-Tier Cream Cake (Perishable Confectionery)',
+    category: 'Perishable & Fragile Bakery',
+    monitoredHazard: 'Cold Chain (≤ 8°C) & Mechanical Vibration',
+    description: 'Van hits a major roadway pothole (SW-420 > 4.5G drop), cracking the refrigeration seal and melting cream decorations.',
     expectedOutcome: 'NOT DELIVERED',
     expectedClaimType: 'DROP & TEMP_BREACH',
     records: [
-      { temp_c: 4.8, humidity: 55.0, shock: 0, event: 'NONE', note: 'Dispatch from bakery: Normal cold storage (4.8°C)', dt: 2 },
-      { temp_c: 5.1, humidity: 54.5, shock: 0, event: 'NONE', note: 'In transit van: Temperature safe (5.1°C), shock stable (0G)', dt: 2 },
-      { temp_c: 5.0, humidity: 56.0, shock: 0, event: 'NONE', note: 'Transit checkpoint: Temperature safe (5.0°C)', dt: 2 },
-      // Heavy Shock 1: Van hits deep pothole!
-      { temp_c: 14.2, humidity: 60.0, shock: 1, event: 'DROP', note: '💥 SEVERE SHOCK DETECTED (SW-420 > 4.5G)! Cake dropped inside van! Cooling unit cracked!', dt: 2 },
-      // Heavy Shock 2 + sustained rising temperature
-      { temp_c: 15.5, humidity: 62.0, shock: 1, event: 'DROP', note: '💥 SECONDARY SHOCK IMPACT! Cake box flipped on side! Temp rising to 15.5°C', dt: 8 },
-      // Final sustained heat breach + damaged physical structure
-      { temp_c: 16.5, humidity: 65.0, shock: 1, event: 'TEMP_BREACH', note: '🚨 Sustained heat breach (16.5°C for 17s) + physical impact -> HIGH RISK: NOT DELIVERED!', dt: 9 }
+      { temp_c: 4.8, humidity: 55.0, shock: 0, tilt: 0, flipped: 0, event: 'NONE', note: 'Bakery dispatch: Chilled display box (4.8°C, 0G shock)', dt: 2 },
+      { temp_c: 5.1, humidity: 54.5, shock: 0, tilt: 0, flipped: 0, event: 'NONE', note: 'Suburban transit: Smooth driving, stable temperature', dt: 2 },
+      { temp_c: 5.0, humidity: 56.0, shock: 0, tilt: 0, flipped: 0, event: 'NONE', note: 'City approach: Temperature holding steady (5.0°C)', dt: 2 },
+      // Severe drop pothole impact
+      { temp_c: 14.2, humidity: 60.0, shock: 1, tilt: 0, flipped: 0, event: 'DROP', note: '💥 SEVERE POTHOLE IMPACT (SW-420 > 4.5G)! Cake dropped off rack, cooler cracked!', dt: 2 },
+      { temp_c: 15.5, humidity: 62.0, shock: 1, tilt: 0, flipped: 0, event: 'DROP', note: '💥 Secondary shock impact! Internal cream structural collapse', dt: 8 },
+      { temp_c: 16.5, humidity: 65.0, shock: 1, tilt: 0, flipped: 0, event: 'TEMP_BREACH', note: '🚨 Sustained heat breach (16.5°C for 17s) + physical impact -> HIGH RISK: NOT DELIVERED!', dt: 9 }
     ]
   },
   {
     boxId: 'TV-001',
-    name: '📺 55" OLED Smart TV (Electronics)',
-    category: 'Sensitive Electronics',
-    description: 'Requires dry storage ≤ 75% humidity. Heavy rain causes water leakage in container.',
+    name: '📺 55" 4K OLED Smart TV (High-End Electronics)',
+    category: 'Fragile Glass & Precision Circuitry',
+    monitoredHazard: 'Moisture (≤ 70% Humidity) & Drop Shock',
+    description: 'Cargo truck container develops roof leak during monsoon storm (88% humidity) followed by sudden deceleration impact.',
     expectedOutcome: 'NOT DELIVERED',
-    expectedClaimType: 'HUMIDITY_BREACH',
+    expectedClaimType: 'HUMIDITY_BREACH & DROP',
     records: [
-      { temp_c: 22.0, humidity: 50.0, shock: 0, event: 'NONE', note: 'Warehouse dispatch: Dry environment (50% humidity)' },
-      { temp_c: 22.5, humidity: 52.0, shock: 0, event: 'NONE', note: 'Highway transit: Safe condition (52% humidity)' },
-      { temp_c: 23.0, humidity: 55.0, shock: 0, event: 'NONE', note: 'Approaching city: Weather turning humid (55%)' },
-      // Moisture ingress
-      { temp_c: 23.5, humidity: 88.0, shock: 0, event: 'HUMIDITY_BREACH', note: '🚨 Van roof water leak! Humidity spikes to 88% (> 75%) -> Circuit damage risk! HIGH RISK: NOT DELIVERED!' }
+      { temp_c: 22.0, humidity: 50.0, shock: 0, tilt: 0, flipped: 0, event: 'NONE', note: 'Sony Central Warehouse: Dispatched in sealed foam packaging', dt: 2 },
+      { temp_c: 22.5, humidity: 52.0, shock: 0, tilt: 0, flipped: 0, event: 'NONE', note: 'Highway freight: Nominal air humidity (52%)', dt: 2 },
+      { temp_c: 23.0, humidity: 58.0, shock: 0, tilt: 0, flipped: 0, event: 'NONE', note: 'Monsoon rainstorm begins: Humidity rising inside truck', dt: 2 },
+      // Moisture breach + impact
+      { temp_c: 23.5, humidity: 88.0, shock: 0, tilt: 0, flipped: 0, event: 'HUMIDITY_BREACH', note: '🚨 Container roof leak! Humidity surges to 88% (> 70% threshold) -> Circuit short hazard!', dt: 2 },
+      { temp_c: 23.8, humidity: 89.5, shock: 1, tilt: 0, flipped: 0, event: 'DROP', note: '💥 Sudden brake collision! Box impacted cargo barrier (Shock: 1, OLED Panel Crack Risk)', dt: 2 }
+    ]
+  },
+  {
+    boxId: 'FRAGILE-001',
+    name: '💎 Luxury Bohemian Crystal Glassware (Ultra-Fragile)',
+    category: 'Ultra-Fragile Glassware',
+    monitoredHazard: 'Upright Orientation (Tilt / Inversion) & Shock',
+    description: 'Courier ignores "THIS SIDE UP" labels. Package is tilted over 60° and flipped upside down on automated sorting conveyor.',
+    expectedOutcome: 'NOT DELIVERED',
+    expectedClaimType: 'TILT & DROP',
+    records: [
+      { temp_c: 21.0, humidity: 48.0, shock: 0, tilt: 0, flipped: 0, event: 'NONE', note: 'Artisan Glass Studio: Packed with air bubble cushioning, upright (0° tilt)', dt: 2 },
+      { temp_c: 21.5, humidity: 49.0, shock: 0, tilt: 0, flipped: 0, event: 'NONE', note: 'Loaded into express van: Kept vertical on padded pallet', dt: 2 },
+      // Tipping / Inversion
+      { temp_c: 22.0, humidity: 50.0, shock: 0, tilt: 1, flipped: 0, event: 'TILT', note: '⚠️ Package tilted over 65° during rapid van turn!', dt: 2 },
+      { temp_c: 22.2, humidity: 50.0, shock: 1, tilt: 1, flipped: 1, event: 'FLIPPED', note: '🚨 Package flipped upside down on sorting chute! Stemware shattered inside!', dt: 2 }
+    ]
+  },
+  {
+    boxId: 'ELECTRONIC-001',
+    name: '💻 RTX 4090 Gaming Laptop (Precision Hardware)',
+    category: 'Premium Computing Electronics',
+    monitoredHazard: 'Mechanical G-Force Impact & Moisture',
+    description: 'Delivery agent accidentally drops laptop case from 1.5 meters during delivery handoff (> 5G impact detected).',
+    expectedOutcome: 'NOT DELIVERED',
+    expectedClaimType: 'DROP',
+    records: [
+      { temp_c: 23.0, humidity: 45.0, shock: 0, tilt: 0, flipped: 0, event: 'NONE', note: 'Tech hub dispatch: Sealed antistatic enclosure', dt: 2 },
+      { temp_c: 23.5, humidity: 46.0, shock: 0, tilt: 0, flipped: 0, event: 'NONE', note: 'Courier bag transit: Normal urban movement', dt: 2 },
+      { temp_c: 24.0, humidity: 47.0, shock: 0, tilt: 0, flipped: 0, event: 'NONE', note: 'Customer apartment lobby arrival', dt: 2 },
+      // Drop impact
+      { temp_c: 24.2, humidity: 48.0, shock: 1, tilt: 0, flipped: 0, event: 'DROP', note: '💥 VIOLENT 1.5M DROP (SW-420 > 5.0G Shock)! Motherboard solder joint crack hazard!', dt: 2 }
     ]
   },
   {
     boxId: 'BOOKS-001',
-    name: '📚 Educational Hardcover Books (Dry Goods)',
-    category: 'Non-Perishable Goods',
-    description: 'Standard cargo with no temperature sensitivity. Delivered safely without incident.',
+    name: '📚 Hardcover Medical Encyclopedias (Durable Goods)',
+    category: 'Standard Cargo (Control Baseline)',
+    monitoredHazard: 'Complete Cryptographic Proof-of-Delivery',
+    description: 'Standard shipment with zero hazards. Demonstrates that safe transit triggers zero false positives and records complete SHA-256 chain.',
     expectedOutcome: 'DELIVERED',
     expectedClaimType: null,
     records: [
-      { temp_c: 21.5, humidity: 48.0, shock: 0, event: 'NONE', note: 'Publisher warehouse: Packed securely' },
-      { temp_c: 22.0, humidity: 49.0, shock: 0, event: 'NONE', note: 'Sorting hub: Scanned and loaded' },
-      { temp_c: 22.8, humidity: 51.0, shock: 0, event: 'NONE', note: 'Midway transit: Normal road conditions' },
-      { temp_c: 23.0, humidity: 50.0, shock: 0, event: 'NONE', note: 'Local delivery hub arrival' },
-      { temp_c: 22.4, humidity: 47.0, shock: 0, event: 'NONE', note: 'Out for delivery to customer' },
-      { temp_c: 22.0, humidity: 46.0, shock: 0, event: 'NONE', note: '✅ Safely delivered to recipient doorstep!' }
+      { temp_c: 21.5, humidity: 48.0, shock: 0, tilt: 0, flipped: 0, event: 'NONE', note: 'Publisher warehouse: Packed and strapped securely' },
+      { temp_c: 22.0, humidity: 49.0, shock: 0, tilt: 0, flipped: 0, event: 'NONE', note: 'Sorting hub: Barcode verified, loaded on pallet' },
+      { temp_c: 22.8, humidity: 51.0, shock: 0, tilt: 0, flipped: 0, event: 'NONE', note: 'Highway transit: Normal road vibrations (0G)' },
+      { temp_c: 23.0, humidity: 50.0, shock: 0, tilt: 0, flipped: 0, event: 'NONE', note: 'Local delivery hub arrival: Sorted for dispatch' },
+      { temp_c: 22.4, humidity: 47.0, shock: 0, tilt: 0, flipped: 0, event: 'NONE', note: 'Out for delivery: Courier on delivery route' },
+      { temp_c: 22.0, humidity: 46.0, shock: 0, tilt: 0, flipped: 0, event: 'NONE', note: '✅ Safely delivered to recipient doorstep without single breach!' }
     ]
   }
 ];
@@ -194,19 +251,20 @@ function fetchVerify(boxId) {
 }
 
 async function simulateItem(item) {
-  console.log('\n' + '═'.repeat(65));
-  console.log(`  📦 ITEM: ${item.name}`);
-  console.log(`  Box ID   : ${item.boxId} | Category: ${item.category}`);
-  console.log(`  Scenario : ${item.description}`);
-  console.log('═'.repeat(65));
+  console.log('\n' + '═'.repeat(70));
+  console.log(`  📦 SCENARIO: ${item.name}`);
+  console.log(`  Box ID    : ${item.boxId} | Category: ${item.category}`);
+  console.log(`  Hazard    : ${item.monitoredHazard}`);
+  console.log(`  Narrative : ${item.description}`);
+  console.log('═'.repeat(70));
 
   // Reset demo state for clean run
   await resetBox(item.boxId);
-  log(`Cleaned existing demo records for ${item.boxId}`);
+  log(`Resetting and initializing clean chain for ${item.boxId}...`);
 
   let currentSeq = 0;
   let currentPrevHash = GENESIS_PREV_HASH;
-  let currentTs = Math.floor(Date.now() / 1000);
+  let currentTs = Math.floor(Date.now() / 1000) - 60; // 1 min ago so latest matches now
   const sentRecords = [];
 
   for (let i = 0; i < item.records.length; i++) {
@@ -220,8 +278,8 @@ async function simulateItem(item) {
       temp_c: step.temp_c,
       humidity: step.humidity,
       shock: step.shock || 0,
-      tilt: 0,
-      flipped: 0,
+      tilt: step.tilt || 0,
+      flipped: step.flipped || 0,
       light: 35,
       lid_open: 0,
       event: step.event || 'NONE',
@@ -232,7 +290,7 @@ async function simulateItem(item) {
     const resp = await sendRecord(signed);
 
     if (resp.ok) {
-      log(`[STEP ${i + 1}/${item.records.length}] Seq #${signed.seq} | Temp: ${signed.temp_c}°C | Hum: ${signed.humidity}% | ${step.note}`);
+      log(`[STEP ${i + 1}/${item.records.length}] Seq #${signed.seq} | Temp: ${signed.temp_c}°C | Hum: ${signed.humidity}% | Shock: ${signed.shock} | Tilt: ${signed.tilt} | ${step.note}`);
       sentRecords.push({ ...signed, note: step.note });
       currentPrevHash = signed.hash;
       currentSeq++;
@@ -244,7 +302,7 @@ async function simulateItem(item) {
   }
 
   // Allow insurance engine to finalize
-  await sleep(1500);
+  await sleep(1200);
 
   const claims = await fetchClaims(item.boxId);
   const payouts = await fetchPayouts(item.boxId);
@@ -255,23 +313,32 @@ async function simulateItem(item) {
   const testPassed = actualOutcome === item.expectedOutcome;
   const totalPayout = payouts.reduce((sum, p) => sum + (p.amount_inr || 0), 0);
 
-  console.log('\n' + '─'.repeat(65));
-  console.log(`  📊 VERDICT FOR ${item.name}:`);
-  console.log(`  • Delivery Result : ${testPassed ? '✅' : '❌'} ${actualOutcome} (Expected: ${item.expectedOutcome})`);
-  console.log(`  • Risk Assessment : ${isReturned ? '🚨 HIGH RISK (BREACH DETECTED)' : '🟢 LOW RISK (SAFE)'}`);
-  console.log(`  • Hash Chain Audit: ${verify && verify.ok ? '✅ VERIFIED (SHA-256 + HMAC Valid)' : '❌ BROKEN'}`);
-  console.log(`  • Total Telemetry : ${sentRecords.length} chained blocks`);
-  console.log(`  • Claims Count    : ${claims.length}`);
-  claims.forEach(c => console.log(`      └─ [${c.type}] ${c.reason}`));
-  console.log(`  • Payouts Count   : ${payouts.length}`);
-  payouts.forEach(p => console.log(`      └─ ₹${p.amount_inr.toLocaleString()} INR (ID: ${p.payout_id}) -> ${p.beneficiary}`));
-  console.log(`  • Total Settled   : ₹${totalPayout.toLocaleString()} INR`);
-  console.log('─'.repeat(65));
+  console.log('\n' + '─'.repeat(70));
+  console.log(`  📊 AUDIT & DECISION VERDICT FOR ${item.boxId}:`);
+  console.log(`  • Delivery Verdict : ${testPassed ? '✅' : '❌'} ${actualOutcome} (Expected: ${item.expectedOutcome})`);
+  console.log(`  • Risk Assessment  : ${isReturned ? '🚨 HIGH RISK (BREACH / CARGO DAMAGED)' : '🟢 LOW RISK (SAFE TRANSIT)'}`);
+  console.log(`  • Hash Chain Audit : ${verify && verify.ok ? '✅ 100% CRYPTOGRAPHICALLY INTACT' : '❌ BROKEN'}`);
+  console.log(`  • Total Telemetry  : ${sentRecords.length} chained sequential blocks`);
+  console.log(`  • Auto Claims (${claims.length}) :`);
+  if (claims.length === 0) {
+    console.log(`      └─ None (Zero incidents recorded)`);
+  } else {
+    claims.forEach(c => console.log(`      └─ [${c.type}] ${c.reason}`));
+  }
+  console.log(`  • Insurance Payouts (${payouts.length}) :`);
+  if (payouts.length === 0) {
+    console.log(`      └─ ₹0 INR (Clean delivery)`);
+  } else {
+    payouts.forEach(p => console.log(`      └─ ₹${p.amount_inr.toLocaleString()} INR [${p.payout_id}] -> ${p.beneficiary}`));
+  }
+  console.log(`  • Total Settled    : ₹${totalPayout.toLocaleString()} INR`);
+  console.log('─'.repeat(70));
 
   return {
     boxId: item.boxId,
     item: item.name,
     category: item.category,
+    monitoredHazard: item.monitoredHazard,
     description: item.description,
     recordsSent: sentRecords.length,
     chainVerified: verify && verify.ok,
@@ -285,28 +352,28 @@ async function simulateItem(item) {
 }
 
 async function main() {
-  console.log('\n' + '█'.repeat(65));
-  console.log('  🚀 TRUSTBOX HACKATHON: 3-ITEM DELIVERY SIMULATION');
-  console.log('  Items: Cake (Perishable) | TV (Electronics) | Books (Safe)');
-  console.log('█'.repeat(65));
+  console.log('\n' + '█'.repeat(70));
+  console.log('  🚀 TRUSTBOX: PITCH-READY TEST SUITE (6 REAL-WORLD SCENARIOS)');
+  console.log('  Vaccines | Cakes | OLED TV | Fragile Glass | Laptops | Books');
+  console.log('█'.repeat(70));
 
   const results = [];
   for (const item of ITEMS) {
     const res = await simulateItem(item);
     results.push(res);
-    await sleep(2000);
+    await sleep(1000);
   }
 
   // Summary Table
-  console.log('\n\n' + '█'.repeat(65));
-  console.log('  🏁 FINAL SIMULATION SUMMARY TABLE');
-  console.log('█'.repeat(65));
+  console.log('\n\n' + '█'.repeat(70));
+  console.log('  🏁 FINAL PITCHING DEMO SUMMARY TABLE (ALL SCENARIOS)');
+  console.log('█'.repeat(70));
   results.forEach(r => {
     const mark = r.testPassed ? '✅ PASS' : '❌ FAIL';
     const statusLabel = r.actualOutcome === 'NOT DELIVERED' ? '❌ NOT DELIVERED' : '📦 DELIVERED';
-    console.log(`  ${mark} | ${r.boxId.padEnd(10)} | ${r.item.padEnd(35)} | ${statusLabel} | Payout: ₹${r.totalPayoutINR.toLocaleString()}`);
+    console.log(`  ${mark} | ${r.boxId.padEnd(14)} | ${r.item.slice(0, 30).padEnd(30)} | ${statusLabel.padEnd(16)} | Payout: ₹${r.totalPayoutINR.toLocaleString()}`);
   });
-  console.log('█'.repeat(65));
+  console.log('█'.repeat(70));
 
   // Save JSON
   const outputData = {
@@ -325,42 +392,43 @@ async function main() {
 }
 
 function generateMarkdownReport(results) {
-  let md = `# 📦 TrustBox 3-Item Delivery Simulation Report\n\n`;
+  let md = `# 📦 TrustBox Pitching Test Suite — Full Audit Report\n\n`;
   md += `**Execution Time:** ${new Date().toLocaleString('en-IN')}\n\n`;
-  md += `## 📋 Summary Table\n\n`;
-  md += `| Item | Box ID | Category | Breach Type | Outcome | Payout (INR) | Status |\n`;
+  md += `## 📋 Judge Presentation Summary Table\n\n`;
+  md += `| Item | Box ID | Monitored Hazard | Breach Detected | Final Verdict | Parametric Payout | Test Status |\n`;
   md += `|---|---|---|---|---|---|---|\n`;
 
   results.forEach(r => {
     const claimType = r.claims.length > 0 ? r.claims.map(c => c.type).join(' + ') : 'None (Safe)';
     const outcome = r.actualOutcome === 'NOT DELIVERED' ? '❌ NOT DELIVERED' : '✅ DELIVERED';
     const testStatus = r.testPassed ? '✅ PASS' : '❌ FAIL';
-    md += `| ${r.item} | \`${r.boxId}\` | ${r.category} | ${claimType} | **${outcome}** | ₹${r.totalPayoutINR.toLocaleString()} | ${testStatus} |\n`;
+    md += `| ${r.item} | \`${r.boxId}\` | ${r.monitoredHazard} | ${claimType} | **${outcome}** | ₹${r.totalPayoutINR.toLocaleString()} | ${testStatus} |\n`;
   });
 
-  md += `\n---\n\n## 🔍 Item-by-Item Detailed Breakdown\n\n`;
+  md += `\n---\n\n## 🔍 Scenario-by-Scenario Audit Details\n\n`;
 
   results.forEach(r => {
     md += `### ${r.item} (\`${r.boxId}\`)\n`;
-    md += `- **Category:** ${r.category}\n`;
-    md += `- **Condition:** ${r.description}\n`;
-    md += `- **Cryptographic Hash Chain:** ${r.chainVerified ? '✅ 100% Unbroken & Verified' : '❌ Chain Broken'}\n`;
-    md += `- **Final Delivery Outcome:** **${r.actualOutcome}** (Expected: ${r.expectedOutcome})\n`;
-    md += `- **Claims Filed:** ${r.claims.length}\n`;
+    md += `- **Cargo Category:** ${r.category}\n`;
+    md += `- **Monitored Hazard:** ${r.monitoredHazard}\n`;
+    md += `- **Incident Narrative:** ${r.description}\n`;
+    md += `- **Cryptographic Hash Chain:** ${r.chainVerified ? '✅ 100% Intact & Unbroken (SHA-256 + HMAC-SHA256 Valid)' : '❌ Broken'}\n`;
+    md += `- **Final Delivery Verdict:** **${r.actualOutcome}** (Expected: ${r.expectedOutcome})\n`;
+    md += `- **Parametric Claims Approved:** ${r.claims.length}\n`;
     if (r.claims.length > 0) {
       r.claims.forEach(c => {
-        md += `  - **Type:** \`${c.type}\`\n`;
-        md += `  - **Reason:** ${c.reason}\n`;
+        md += `  - **Claim Type:** \`${c.type}\`\n`;
+        md += `  - **Trigger Reason:** ${c.reason}\n`;
         md += `  - **Status:** \`${c.status}\`\n`;
       });
     }
-    md += `- **Insurance Payouts:** ${r.payouts.length}\n`;
+    md += `- **Automated Insurance Settlement:** ${r.payouts.length}\n`;
     if (r.payouts.length > 0) {
       r.payouts.forEach(p => {
-        md += `  - **Amount:** **₹${p.amount_inr.toLocaleString()} INR**\n`;
-        md += `  - **Payout ID:** \`${p.payout_id}\`\n`;
+        md += `  - **Settlement Amount:** **₹${p.amount_inr.toLocaleString()} INR**\n`;
+        md += `  - **Transaction ID:** \`${p.payout_id}\`\n`;
         md += `  - **Beneficiary:** ${p.beneficiary}\n`;
-        md += `  - **Status:** \`${p.status}\`\n`;
+        md += `  - **Status:** \`${p.status}\` (Instant Parametric Transfer)\n`;
       });
     }
     md += `\n---\n\n`;
