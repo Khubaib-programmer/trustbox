@@ -23,7 +23,9 @@ import {
   RotateCcw,
   Sliders,
   CheckCircle2,
-  AlertTriangle
+  AlertTriangle,
+  WifiOff,
+  Radio
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import RouteMap from '../components/RouteMap';
@@ -46,6 +48,12 @@ export default function Dashboard() {
   const [payouts, setPayouts] = useState([]);
   const [latestRecord, setLatestRecord] = useState(null);
   const [chainVerify, setChainVerify] = useState(null);
+
+  // ESP32 Hardware inactivity watchdog (> 30s timeout)
+  const [isDeviceTimedOut, setIsDeviceTimedOut] = useState(false);
+  const [secondsSinceLastReading, setSecondsSinceLastReading] = useState(0);
+  const lastReadingTimestampRef = useRef(Date.now());
+  const [isAlertDismissed, setIsAlertDismissed] = useState(false);
 
   // Chart view metric: 'temp' | 'humidity'
   const [activeMetric, setActiveMetric] = useState('temp');
@@ -112,6 +120,10 @@ export default function Dashboard() {
 
     setBoxId(cleanId);
     activeBoxRef.current = cleanId;
+    lastReadingTimestampRef.current = Date.now();
+    setIsDeviceTimedOut(false);
+    setIsAlertDismissed(false);
+    setSecondsSinceLastReading(0);
     setIsDeviceMenuOpen(false);
     setTamperSuccessMsg(null);
     setIsLoading(true);
@@ -169,7 +181,17 @@ export default function Dashboard() {
       setChainVerify(parsedVerify);
 
       if (parsedRecords.length > 0) {
-        setLatestRecord(parsedRecords[parsedRecords.length - 1]);
+        const latest = parsedRecords[parsedRecords.length - 1];
+        setLatestRecord(latest);
+        const latestTsMs = latest.receivedAt ? new Date(latest.receivedAt).getTime() : (latest.ts * 1000);
+        const elapsed = Math.floor((Date.now() - latestTsMs) / 1000);
+        if (elapsed >= 0 && elapsed < 86400) {
+          lastReadingTimestampRef.current = latestTsMs;
+          setSecondsSinceLastReading(elapsed);
+          if (elapsed >= 30) {
+            setIsDeviceTimedOut(true);
+          }
+        }
       } else {
         setLatestRecord(null);
       }
@@ -194,6 +216,11 @@ export default function Dashboard() {
 
     socket.on('record', (newRecord) => {
       if (newRecord.box_id === activeBoxRef.current) {
+        lastReadingTimestampRef.current = Date.now();
+        setIsDeviceTimedOut(false);
+        setIsAlertDismissed(false);
+        setSecondsSinceLastReading(0);
+
         setRecords((prev) => {
           if (prev.some((r) => r.seq === newRecord.seq)) return prev;
           const updated = [...prev, newRecord].sort((a, b) => a.seq - b.seq);
@@ -241,6 +268,21 @@ export default function Dashboard() {
       clearInterval(fallbackInterval);
     };
   }, [boxId, fetchData]);
+
+  // 30-Second ESP32 Inactivity Watchdog Timer
+  useEffect(() => {
+    const watchdog = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - lastReadingTimestampRef.current) / 1000);
+      setSecondsSinceLastReading(elapsed);
+      if (elapsed >= 30) {
+        setIsDeviceTimedOut(true);
+      } else {
+        setIsDeviceTimedOut(false);
+      }
+    }, 1000);
+
+    return () => clearInterval(watchdog);
+  }, []);
 
   // Tamper simulation handler (kept minimal for review/demo)
   const handleTamper = async () => {
@@ -436,15 +478,19 @@ export default function Dashboard() {
 
         {/* Right side controls */}
         <div className="flex items-center gap-3">
-          {/* Live indicator */}
+          {/* Live indicator with 30s timeout alert */}
           <div className="hidden sm:inline-flex items-center gap-1.5 text-[12px] text-muted tabular">
             <span className="relative flex h-2 w-2">
-              {isConnected && (
+              {isConnected && !isDeviceTimedOut && (
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-safe opacity-75" />
               )}
-              <span className={`relative inline-flex rounded-full h-2 w-2 ${isConnected ? 'bg-safe' : 'bg-muted'}`} />
+              <span className={`relative inline-flex rounded-full h-2 w-2 ${
+                isDeviceTimedOut ? 'bg-danger' : isConnected ? 'bg-safe' : 'bg-muted'
+              }`} />
             </span>
-            <span>{isConnected ? 'Live' : 'Offline'}</span>
+            <span className={isDeviceTimedOut ? 'text-danger font-medium' : ''}>
+              {isDeviceTimedOut ? 'Model Disconnected (>30s)' : isConnected ? 'Live' : 'Offline'}
+            </span>
           </div>
 
           {/* Theme Toggle */}
@@ -466,6 +512,55 @@ export default function Dashboard() {
           </button>
         </div>
       </header>
+
+      {/* ⚠️ ESP32 / Hardware Inactivity Popup Notification (>30s) */}
+      {isDeviceTimedOut && !isAlertDismissed && (
+        <div 
+          className="fixed top-20 right-4 sm:right-8 z-50 max-w-md w-[calc(100%-2rem)] bg-surface/95 border-2 border-danger/60 shadow-2xl rounded-2xl p-5 backdrop-blur-xl animate-in fade-in slide-in-from-top-4 duration-300"
+          role="alert"
+        >
+          <div className="flex items-start gap-3.5">
+            <div className="w-10 h-10 rounded-full bg-danger/15 border border-danger/30 flex items-center justify-center shrink-0">
+              <WifiOff className="w-5 h-5 text-danger animate-pulse" />
+            </div>
+            <div className="flex-1">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[13px] font-bold text-danger uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-danger animate-ping inline-block" />
+                  Model is not connected
+                </span>
+                <span className="text-[11px] font-mono font-medium bg-danger/15 text-danger px-2 py-0.5 rounded-full tabular">
+                  {secondsSinceLastReading}s elapsed
+                </span>
+              </div>
+              <p className="mt-1.5 text-[13px] text-ink/90 leading-snug">
+                No telemetry response received from ESP32 (<strong className="font-semibold text-ink">{boxId}</strong>) for over 30 seconds.
+              </p>
+              <p className="mt-1 text-[11px] text-muted">
+                Please check your ESP32 Wi-Fi connection, power, or EMQX broker topic.
+              </p>
+              <div className="mt-3.5 flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    lastReadingTimestampRef.current = Date.now();
+                    setIsDeviceTimedOut(false);
+                    fetchData(boxId);
+                  }}
+                  className="px-3.5 py-1.5 bg-danger hover:bg-danger/90 text-white text-[12px] font-semibold rounded-lg shadow-sm transition"
+                >
+                  Retry Ping
+                </button>
+                <button
+                  onClick={() => setIsAlertDismissed(true)}
+                  className="px-3 py-1.5 bg-background hover:bg-surface border border-hairline text-muted hover:text-ink text-[12px] font-medium rounded-lg transition"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main Container */}
       <main className="flex-1 max-w-[1200px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">

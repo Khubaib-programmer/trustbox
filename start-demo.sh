@@ -14,22 +14,6 @@ if ! command -v node &> /dev/null; then
 fi
 echo "✅ Node.js $(node -v)  |  npm $(npm -v)"
 
-# ── Check / Start Mosquitto ──────────────────────────────────
-echo -e "\n🦟 [0/4] Checking Mosquitto MQTT broker..."
-if ! command -v mosquitto &> /dev/null; then
-  echo "❌ Mosquitto not found. Install with: brew install mosquitto"
-  exit 1
-fi
-
-if lsof -i :1883 -t &> /dev/null; then
-  echo "✅ Mosquitto already running on port 1883."
-else
-  echo "▶️  Starting local Mosquitto on port 1883..."
-  mosquitto -c "$DIR/mosquitto.conf" -d
-  sleep 1
-  echo "✅ Mosquitto started."
-fi
-
 # ── Backend Dependencies ─────────────────────────────────────
 echo -e "\n📦 [1/4] Checking Backend dependencies..."
 cd "$DIR/backend"

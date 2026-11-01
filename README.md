@@ -138,7 +138,7 @@ chmod +x start-demo.sh
 
 **Terminal 1 — MQTT Broker:**
 ```bash
-mosquitto -c mosquitto.conf
+mosquitto -d
 ```
 
 **Terminal 2 — Backend Server:**
@@ -198,7 +198,6 @@ npm run test:api
 trustbox/
 ├── README.md                      ← Hackathon submission documentation
 ├── start-demo.sh                  ← One-command launcher
-├── mosquitto.conf                 ← Local MQTT broker configuration
 │
 ├── backend/
 │   ├── server.js                  ← Express REST, MQTT ingestion & WebSockets

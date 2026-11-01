@@ -37,6 +37,9 @@ const CLAIM_WINDOW_SEC = parseInt(process.env.CLAIM_WINDOW_SEC, 10) || 15;
 // e.g. "box-001/telemetry" or "trustbox/raw" or "#" (wildcard all)
 const IOT_MQTT_TOPIC = process.env.IOT_MQTT_TOPIC || 'trustbox/raw/#';
 
+// MQTT client instance
+let globalMqttClient = null;
+
 // In-memory fallback if MongoDB is offline during hackathon demo
 let isMongoConnected = false;
 const inMemoryRecords = new Map(); // boxId -> array of records
@@ -95,21 +98,21 @@ async function getLatestBoxRecord(boxId) {
  *   ball_switch, reed_triggered, delivery_button, breach
  */
 function adaptIoTPayload(raw) {
-  // Prefer DS18B20 (more accurate probe) if present and valid, else fall back to DHT
-  const temp_c = (raw.temperature_ds18b20_c != null && !isNaN(raw.temperature_ds18b20_c))
-    ? parseFloat(Number(raw.temperature_ds18b20_c).toFixed(1))
-    : parseFloat(Number(raw.temperature_dht_c).toFixed(1));
+  // Support flexible field names from ESP32 / EMQX
+  const rawTemp = raw.temperature_ds18b20_c ?? raw.temperature_dht_c ?? raw.temp_c ?? raw.temperature ?? raw.temp;
+  const temp_c = (rawTemp != null && !isNaN(rawTemp)) ? parseFloat(Number(rawTemp).toFixed(1)) : 22.0;
 
-  const humidity = parseFloat(Number(raw.humidity_pct).toFixed(1));
+  const rawHum = raw.humidity_pct ?? raw.humidity ?? raw.hum;
+  const humidity = (rawHum != null && !isNaN(rawHum)) ? parseFloat(Number(rawHum).toFixed(1)) : 50.0;
 
   // Booleans → 0/1
-  const b = (v) => (v === true || v === 1 || v === '1') ? 1 : 0;
+  const b = (v) => (v === true || v === 1 || v === '1' || v === 'true') ? 1 : 0;
 
   const shock     = b(raw.shock);
   const tilt      = b(raw.tilt) || b(raw.ball_switch);   // ball_switch = tilt sensor
   const flipped   = b(raw.tilt) && b(raw.ball_switch) ? 1 : 0; // both active = flipped
-  const lid_open  = b(raw.reed_triggered);               // reed switch = magnetic lid sensor
-  const light     = parseInt(raw.photo_raw, 10) || 0;   // raw lux/ADC reading
+  const lid_open  = b(raw.reed_triggered) || b(raw.lid_open);   // reed switch = magnetic lid sensor
+  const light     = parseInt(raw.photo_raw ?? raw.light, 10) || 0;   // raw lux/ADC reading
 
   // Derive event string from breach flags
   let event = 'NONE';
@@ -120,11 +123,14 @@ function adaptIoTPayload(raw) {
     else if (lid_open)                event = 'LID_OPEN';
     else                              event = 'TEMP_BREACH'; // fallback
   } else if (shock)   event = 'DROP';
+  else if (humidity > 75.0 && String(raw.device_id || raw.box_id || '').toUpperCase().startsWith('TV')) event = 'HUMIDITY_BREACH';
   else if (flipped)   event = 'FLIPPED';
   else if (lid_open)  event = 'LID_OPEN';
 
+  const boxId = String(raw.device_id || raw.box_id || 'ESP32-BOX').trim();
+
   return {
-    box_id:   String(raw.device_id || 'box-001').trim(),
+    box_id:   boxId,
     ts:       Math.floor(Date.now() / 1000),   // server timestamp (seconds)
     temp_c,
     humidity,
@@ -306,6 +312,23 @@ async function handleIncomingRecord(record, source = 'REST') {
       io
     );
 
+    // 7. Publish decision response back to MQTT (for ESP32 / EMQX)
+    if (globalMqttClient && globalMqttClient.connected) {
+      const isBreached = record.event && record.event !== 'NONE';
+      const decisionPayload = {
+        box_id: boxId,
+        seq: record.seq,
+        delivery_decision: isBreached ? "NOT DELIVERED" : "DELIVERED",
+        risk_level: isBreached ? "HIGH_RISK" : "SAFE",
+        event: record.event,
+        temp_c: record.temp_c,
+        humidity: record.humidity,
+        shock: record.shock,
+        timestamp: record.ts
+      };
+      globalMqttClient.publish(`trustbox/${boxId}/decision`, JSON.stringify(decisionPayload));
+    }
+
     console.log(`[RECORD ${source}] ${boxId} #${seq} | Temp: ${record.temp_c}°C | Event: ${record.event} | Hash: ${record.hash.substring(0, 8)}...`);
     return { success: true, record: savedRecord };
   } catch (err) {
@@ -332,7 +355,8 @@ if (MQTT_URL) {
   });
 
   mqttClient.on('connect', () => {
-    console.log('✅ Connected to HiveMQ / MQTT Broker!');
+    globalMqttClient = mqttClient;
+    console.log('✅ Connected to MQTT Broker!');
 
     // --- TrustBox internal signed records (fake-publisher / another TrustBox node) ---
     mqttClient.subscribe('trustbox/+/telemetry', (err) => {
