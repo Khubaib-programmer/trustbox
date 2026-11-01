@@ -9,8 +9,6 @@ const mqtt = require('mqtt');
 const { Record, Claim, Payout } = require('./models');
 const { verifyChain, verifySingleRecord, GENESIS_PREV_HASH } = require('./chain');
 const InsuranceEngine = require('./insurance');
-const res = await fetch("http://127.0.0.1:8000/api/latest");
-const data = await res.json(); 
 
 const app = express();
 const server = http.createServer(app);
