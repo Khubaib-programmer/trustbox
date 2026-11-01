@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { io } from 'socket.io-client';
 import Skeleton from '../components/Skeleton';
+import { API_BASE_URL, SOCKET_URL } from '../config';
 
 export default function VerifyPage() {
   const { boxId } = useParams();
@@ -25,7 +26,7 @@ export default function VerifyPage() {
   const checkChain = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/verify/${encodeURIComponent(boxId)}`);
+      const res = await fetch(`${API_BASE_URL}/api/verify/${encodeURIComponent(boxId)}`);
       const json = await res.json();
       setData(json);
       setLastAuditTime(new Date());
@@ -45,7 +46,7 @@ export default function VerifyPage() {
     checkChain();
 
     // Auto-refresh when record or tamper event arrives
-    const socket = io();
+    const socket = SOCKET_URL ? io(SOCKET_URL, { transports: ['websocket', 'polling'] }) : io();
     socket.on('tamper', (info) => {
       if (info.box_id === boxId) checkChain();
     });

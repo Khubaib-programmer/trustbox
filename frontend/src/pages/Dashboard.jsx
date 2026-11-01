@@ -23,7 +23,9 @@ import {
   RotateCcw,
   Sliders,
   CheckCircle2,
-  AlertTriangle
+  AlertTriangle,
+  WifiOff,
+  Radio
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import RouteMap from '../components/RouteMap';
@@ -32,6 +34,7 @@ import QRCodeModal from '../components/QRCodeModal';
 import KpiTile from '../components/KpiTile';
 import StatusPill from '../components/StatusPill';
 import Skeleton from '../components/Skeleton';
+import { API_BASE_URL, SOCKET_URL } from '../config';
 
 export default function Dashboard() {
   const [boxId, setBoxId] = useState('TB-001');
@@ -46,6 +49,12 @@ export default function Dashboard() {
   const [payouts, setPayouts] = useState([]);
   const [latestRecord, setLatestRecord] = useState(null);
   const [chainVerify, setChainVerify] = useState(null);
+
+  // ESP32 Hardware inactivity watchdog (> 30s timeout)
+  const [isDeviceTimedOut, setIsDeviceTimedOut] = useState(false);
+  const [secondsSinceLastReading, setSecondsSinceLastReading] = useState(0);
+  const lastReadingTimestampRef = useRef(Date.now());
+  const [isAlertDismissed, setIsAlertDismissed] = useState(false);
 
   // Chart view metric: 'temp' | 'humidity'
   const [activeMetric, setActiveMetric] = useState('temp');
@@ -100,7 +109,7 @@ export default function Dashboard() {
   // Fetch all known box IDs in system to populate selector
   const fetchBoxes = async () => {
     try {
-      const res = await fetch('/api/boxes');
+      const res = await fetch(`${API_BASE_URL}/api/boxes`);
       if (res.ok) {
         const data = await res.json();
         if (data.boxes && Array.isArray(data.boxes)) {
@@ -121,6 +130,10 @@ export default function Dashboard() {
 
     setBoxId(cleanId);
     activeBoxRef.current = cleanId;
+    lastReadingTimestampRef.current = Date.now();
+    setIsDeviceTimedOut(false);
+    setIsAlertDismissed(false);
+    setSecondsSinceLastReading(0);
     setIsDeviceMenuOpen(false);
     setTamperSuccessMsg(null);
     setIsLoading(true);
@@ -141,10 +154,10 @@ export default function Dashboard() {
 
     try {
       const [recRes, claimRes, payRes, verifyRes] = await Promise.all([
-        fetch(`/api/records/${encodeURIComponent(targetBox)}?limit=200`),
-        fetch(`/api/claims/${encodeURIComponent(targetBox)}`),
-        fetch(`/api/payouts/${encodeURIComponent(targetBox)}`),
-        fetch(`/api/verify/${encodeURIComponent(targetBox)}`)
+        fetch(`${API_BASE_URL}/api/records/${encodeURIComponent(targetBox)}?limit=200`),
+        fetch(`${API_BASE_URL}/api/claims/${encodeURIComponent(targetBox)}`),
+        fetch(`${API_BASE_URL}/api/payouts/${encodeURIComponent(targetBox)}`),
+        fetch(`${API_BASE_URL}/api/verify/${encodeURIComponent(targetBox)}`)
       ]);
 
       if (requestId !== activeRequestIdRef.current || targetBox !== activeBoxRef.current) {
@@ -178,7 +191,17 @@ export default function Dashboard() {
       setChainVerify(parsedVerify);
 
       if (parsedRecords.length > 0) {
-        setLatestRecord(parsedRecords[parsedRecords.length - 1]);
+        const latest = parsedRecords[parsedRecords.length - 1];
+        setLatestRecord(latest);
+        const latestTsMs = latest.receivedAt ? new Date(latest.receivedAt).getTime() : (latest.ts * 1000);
+        const elapsed = Math.floor((Date.now() - latestTsMs) / 1000);
+        if (elapsed >= 0 && elapsed < 86400) {
+          lastReadingTimestampRef.current = latestTsMs;
+          setSecondsSinceLastReading(elapsed);
+          if (elapsed >= 30) {
+            setIsDeviceTimedOut(true);
+          }
+        }
       } else {
         setLatestRecord(null);
       }
@@ -196,13 +219,18 @@ export default function Dashboard() {
     fetchBoxes();
     fetchData(boxId);
 
-    const socket = io();
+    const socket = SOCKET_URL ? io(SOCKET_URL, { transports: ['websocket', 'polling'] }) : io();
 
     socket.on('connect', () => setIsConnected(true));
     socket.on('disconnect', () => setIsConnected(false));
 
     socket.on('record', (newRecord) => {
       if (newRecord.box_id === activeBoxRef.current) {
+        lastReadingTimestampRef.current = Date.now();
+        setIsDeviceTimedOut(false);
+        setIsAlertDismissed(false);
+        setSecondsSinceLastReading(0);
+
         setRecords((prev) => {
           if (prev.some((r) => r.seq === newRecord.seq)) return prev;
           const updated = [...prev, newRecord].sort((a, b) => a.seq - b.seq);
@@ -210,7 +238,7 @@ export default function Dashboard() {
         });
         setLatestRecord(newRecord);
         // Refresh verify state quietly
-        fetch(`/api/verify/${encodeURIComponent(activeBoxRef.current)}`)
+        fetch(`${API_BASE_URL}/api/verify/${encodeURIComponent(activeBoxRef.current)}`)
           .then((r) => r.json())
           .then((v) => setChainVerify(v))
           .catch(() => {});
@@ -251,6 +279,21 @@ export default function Dashboard() {
     };
   }, [boxId, fetchData]);
 
+  // 30-Second ESP32 Inactivity Watchdog Timer
+  useEffect(() => {
+    const watchdog = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - lastReadingTimestampRef.current) / 1000);
+      setSecondsSinceLastReading(elapsed);
+      if (elapsed >= 30) {
+        setIsDeviceTimedOut(true);
+      } else {
+        setIsDeviceTimedOut(false);
+      }
+    }, 1000);
+
+    return () => clearInterval(watchdog);
+  }, []);
+
   // Tamper simulation handler (kept minimal for review/demo)
   const handleTamper = async () => {
     const seqToTamper = selectedTamperSeq !== '' 
@@ -260,7 +303,7 @@ export default function Dashboard() {
     setIsTamperLoading(true);
     setTamperSuccessMsg(null);
     try {
-      const res = await fetch(`/api/admin/tamper/${encodeURIComponent(boxId)}/${seqToTamper}`, {
+      const res = await fetch(`${API_BASE_URL}/api/admin/tamper/${encodeURIComponent(boxId)}/${seqToTamper}`, {
         method: 'POST'
       });
       const data = await res.json();
@@ -278,25 +321,35 @@ export default function Dashboard() {
   // Status computation
   const isBroken = chainVerify && chainVerify.ok === false;
   const isDrop = latestRecord?.event === 'DROP' || latestRecord?.shock === 1;
-  const isTempBreach = latestRecord?.event === 'TEMP_BREACH' || (latestRecord?.temp_c > 8.0);
+  const isTempBreach = latestRecord?.event === 'TEMP_BREACH' || (latestRecord?.box_id?.startsWith('CAKE') && latestRecord?.temp_c > 8.0);
+  const isHumidityBreach = latestRecord?.event === 'HUMIDITY_BREACH' || (latestRecord?.humidity > 75.0 && latestRecord?.box_id?.startsWith('TV'));
   const isLidOpen = latestRecord?.event === 'LID_OPEN' || latestRecord?.lid_open === 1;
   const isFlipped = latestRecord?.event === 'FLIPPED' || latestRecord?.flipped === 1;
+  const isHighRisk = isDrop || isTempBreach || isHumidityBreach || isBroken || claims.length > 0;
 
   let statusSentenceStart = "Your delivery is ";
   let statusKeyword = "safe.";
   let statusTone = "safe";
 
   if (isBroken) {
-    statusSentenceStart = "Records were ";
-    statusKeyword = "tampered with.";
+    statusSentenceStart = "Security Breach — ";
+    statusKeyword = "NOT DELIVERED (Records Tampered).";
+    statusTone = "danger";
+  } else if (isDrop && isTempBreach) {
+    statusSentenceStart = "High Risk Damage — ";
+    statusKeyword = "NOT DELIVERED (Shock Impact & Melted).";
     statusTone = "danger";
   } else if (isTempBreach) {
-    statusSentenceStart = "Temperature is ";
-    statusKeyword = "too high.";
+    statusSentenceStart = "High Risk Spoilage — ";
+    statusKeyword = "NOT DELIVERED (Temperature Breached).";
+    statusTone = "danger";
+  } else if (isHumidityBreach) {
+    statusSentenceStart = "High Risk Damage — ";
+    statusKeyword = "NOT DELIVERED (Moisture Hazard).";
     statusTone = "danger";
   } else if (isDrop) {
-    statusSentenceStart = "Package was ";
-    statusKeyword = "dropped.";
+    statusSentenceStart = "High Risk Impact — ";
+    statusKeyword = "NOT DELIVERED (Heavy Shock / Dropped).";
     statusTone = "danger";
   } else if (isLidOpen) {
     statusSentenceStart = "Box lid was ";
@@ -323,6 +376,8 @@ export default function Dashboard() {
 
   const currentTemp = latestRecord?.temp_c ?? 4.8;
   const currentHumidity = latestRecord?.humidity ?? 52.0;
+  const currentShock = latestRecord?.shock ?? 0;
+  const hasShock = currentShock === 1 || latestRecord?.event === 'DROP';
   const tempProgress = Math.min(Math.max((currentTemp / 16) * 100, 0), 100);
 
   // Timeline events mapping (human titles, newest first)
@@ -333,6 +388,7 @@ export default function Dashboard() {
     switch (event) {
       case 'DROP': return 'Package dropped';
       case 'TEMP_BREACH': return 'Temperature went above limit';
+      case 'HUMIDITY_BREACH': return 'Humidity exceeded limit (Damage risk)';
       case 'LID_OPEN': return 'Lid was opened';
       case 'FLIPPED': return 'Package was flipped';
       default: return 'Everything normal';
@@ -432,7 +488,7 @@ export default function Dashboard() {
 
         {/* Right side controls */}
         <div className="flex items-center gap-3">
-          {/* Live indicator */}
+          {/* Live indicator with 30s timeout alert */}
           <div className="hidden sm:inline-flex items-center gap-1.5 text-[12px] text-muted tabular">
             <span className="relative flex h-2 w-2">
               {isLive && (
@@ -463,6 +519,55 @@ export default function Dashboard() {
         </div>
       </header>
 
+      {/* ⚠️ ESP32 / Hardware Inactivity Popup Notification (>30s) */}
+      {isDeviceTimedOut && !isAlertDismissed && (
+        <div 
+          className="fixed top-20 right-4 sm:right-8 z-50 max-w-md w-[calc(100%-2rem)] bg-surface/95 border-2 border-danger/60 shadow-2xl rounded-2xl p-5 backdrop-blur-xl animate-in fade-in slide-in-from-top-4 duration-300"
+          role="alert"
+        >
+          <div className="flex items-start gap-3.5">
+            <div className="w-10 h-10 rounded-full bg-danger/15 border border-danger/30 flex items-center justify-center shrink-0">
+              <WifiOff className="w-5 h-5 text-danger animate-pulse" />
+            </div>
+            <div className="flex-1">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[13px] font-bold text-danger uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-danger animate-ping inline-block" />
+                  Model is not connected
+                </span>
+                <span className="text-[11px] font-mono font-medium bg-danger/15 text-danger px-2 py-0.5 rounded-full tabular">
+                  {secondsSinceLastReading}s elapsed
+                </span>
+              </div>
+              <p className="mt-1.5 text-[13px] text-ink/90 leading-snug">
+                No telemetry response received from ESP32 (<strong className="font-semibold text-ink">{boxId}</strong>) for over 30 seconds.
+              </p>
+              <p className="mt-1 text-[11px] text-muted">
+                Please check your ESP32 Wi-Fi connection, power, or EMQX broker topic.
+              </p>
+              <div className="mt-3.5 flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    lastReadingTimestampRef.current = Date.now();
+                    setIsDeviceTimedOut(false);
+                    fetchData(boxId);
+                  }}
+                  className="px-3.5 py-1.5 bg-danger hover:bg-danger/90 text-white text-[12px] font-semibold rounded-lg shadow-sm transition"
+                >
+                  Retry Ping
+                </button>
+                <button
+                  onClick={() => setIsAlertDismissed(true)}
+                  className="px-3 py-1.5 bg-background hover:bg-surface border border-hairline text-muted hover:text-ink text-[12px] font-medium rounded-lg transition"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Main Container */}
       <main className="flex-1 max-w-[1200px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
         
@@ -474,6 +579,19 @@ export default function Dashboard() {
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
             {/* Left: Giant status sentence */}
             <div className="max-w-xl">
+              <div className="mb-3 flex items-center gap-2">
+                <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold tracking-wide uppercase shadow-sm ${
+                  isHighRisk ? 'bg-danger text-white' : 'bg-safe text-white'
+                }`}>
+                  {isHighRisk ? '❌ NOT DELIVERED' : '✅ DELIVERED SAFELY'}
+                </span>
+                {isHighRisk && (
+                  <span className="text-xs font-semibold text-danger uppercase tracking-wider">
+                    High Risk: Cargo Compromised
+                  </span>
+                )}
+              </div>
+
               <h1 className="text-[34px] sm:text-[44px] lg:text-[48px] font-semibold tracking-tighter leading-tight text-ink">
                 <span>{statusSentenceStart}</span>
                 <span className={heroStatusTextColors}>{statusKeyword}</span>
@@ -513,13 +631,13 @@ export default function Dashboard() {
           </div>
         </section>
 
-        {/* C) KPI Row (4 Equal Minimal Tiles) */}
-        <section className="grid grid-cols-2 lg:grid-cols-4 gap-6 sm:gap-8 py-2 border-y border-hairline">
+        {/* C) KPI Row (5 Minimal Tiles with Shock Sensor beside Temp & Humidity) */}
+        <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-6 sm:gap-6 py-2 border-y border-hairline">
           <KpiTile 
             label="Temperature"
             value={currentTemp.toFixed(1)}
             unit="°C"
-            delta={currentTemp <= 8.0 ? "Safe threshold" : "Limit exceeded"}
+            delta={currentTemp <= 8.0 ? "Safe cold chain" : "Limit exceeded"}
             statusTone={currentTemp <= 8.0 ? "safe" : "danger"}
           />
 
@@ -527,7 +645,16 @@ export default function Dashboard() {
             label="Humidity"
             value={currentHumidity.toFixed(1)}
             unit="%"
-            delta="Nominal air humidity"
+            delta={currentHumidity <= 75.0 ? "Nominal humidity" : "Limit exceeded"}
+            statusTone={currentHumidity <= 75.0 ? "safe" : "danger"}
+          />
+
+          <KpiTile 
+            label="Shock / Drop"
+            value={hasShock ? "DETECTED" : "None"}
+            statusIcon={hasShock ? AlertTriangle : Check}
+            statusTone={hasShock ? "danger" : "safe"}
+            delta={hasShock ? "SW-420 Impact > 3G" : "Stable sensor (0G)"}
           />
 
           <KpiTile 

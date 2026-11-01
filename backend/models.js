@@ -25,7 +25,7 @@ RecordSchema.index({ box_id: 1, seq: 1 }, { unique: true });
 
 const ClaimSchema = new mongoose.Schema({
   box_id: { type: String, required: true, index: true },
-  type: { type: String, required: true, enum: ['TEMP_BREACH', 'DROP', 'TILT', 'TAMPER'] },
+  type: { type: String, required: true, enum: ['TEMP_BREACH', 'DROP', 'TILT', 'TAMPER', 'HUMIDITY_BREACH'] },
   status: { type: String, default: 'APPROVED' },
   reason: { type: String, required: true },
   triggerSeq: { type: Number },

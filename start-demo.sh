@@ -7,46 +7,64 @@ echo "========================================================"
 echo "  🚀 STARTING TRUSTBOX SYSTEM (HACKATHON DEMO RUNNER)   "
 echo "========================================================"
 
-# Check Node
+# ── Check Node ──────────────────────────────────────────────
 if ! command -v node &> /dev/null; then
-  echo "❌ Node.js is not found in PATH. Please install Node v18+ or run: brew install node"
+  echo "❌ Node.js not found. Install from https://nodejs.org or: brew install node"
   exit 1
 fi
+echo "✅ Node.js $(node -v)  |  npm $(npm -v)"
 
-echo " Node.js version: $(node -v)"
-echo " npm version:     $(npm -v)"
-
-# 1. Install Backend Dependencies
+# ── Backend Dependencies ─────────────────────────────────────
 echo -e "\n📦 [1/4] Checking Backend dependencies..."
 cd "$DIR/backend"
 if [ ! -d "node_modules" ]; then
   npm install
 fi
+echo "✅ Backend dependencies ready."
 
-# 2. Run Cryptographic Tests
-echo -e "\n🧪 [2/4] Verifying Cryptographic Parity & Chain Engine..."
+# ── Cryptographic Tests ──────────────────────────────────────
+echo -e "\n🧪 [2/4] Verifying cryptographic chain engine..."
 node test-chain.js
 
-# 3. Install Frontend Dependencies
+# ── Frontend Dependencies ────────────────────────────────────
 echo -e "\n📦 [3/4] Checking Frontend dependencies..."
 cd "$DIR/frontend"
 if [ ! -d "node_modules" ]; then
   npm install
 fi
+echo "✅ Frontend dependencies ready."
 
+# ── .env check ──────────────────────────────────────────────
+echo -e "\n🔑 [4/4] Checking environment config..."
+if [ ! -f "$DIR/backend/.env" ]; then
+  echo "⚠️  No backend/.env found — copying from .env.example"
+  cp "$DIR/backend/.env.example" "$DIR/backend/.env"
+  echo "   ✏️  Edit backend/.env and set MONGODB_URI if you have Atlas credentials."
+fi
+echo "✅ .env present."
+
+# ── Done ─────────────────────────────────────────────────────
 echo -e "\n========================================================"
-echo "  🎉 TrustBox setup verified and ready!"
+echo "  🎉 TrustBox verified and ready!"
 echo "========================================================"
-echo "To run the demo:"
-echo "1. Terminal 1 (Backend):"
-echo "   cd backend && npm run dev"
 echo ""
-echo "2. Terminal 2 (Frontend):"
-echo "   cd frontend && npm run dev"
+echo "  Mosquitto:  mqtt://localhost:1883  🟢 running"
 echo ""
-echo "3. Terminal 3 (Simulator):"
-echo "   cd backend && npm run simulate"
-echo "   - To breach cold chain: npm run simulate:heat"
-echo "   - To drop box:         npm run simulate:drop"
+echo "  Open 3 more terminals and run:"
+echo ""
+echo "  Terminal 1 — Backend:"
+echo "    cd $(basename $DIR)/backend && npm run dev"
+echo ""
+echo "  Terminal 2 — Frontend:"
+echo "    cd $(basename $DIR)/frontend && npm run dev"
+echo ""
+echo "  Terminal 3 — Simulator:"
+echo "    cd $(basename $DIR)/backend && npm run simulate"
+echo ""
+echo "  Then open: http://localhost:3000 and select TB-001"
+echo ""
+echo "  Demo scenarios:"
+echo "    npm run simulate:heat   → Temperature breach + ₹50,000 payout"
+echo "    npm run simulate:drop   → Drop impact + ₹25,000 payout"
 echo "========================================================"
 

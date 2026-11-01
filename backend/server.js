@@ -9,6 +9,8 @@ const mqtt = require('mqtt');
 const { Record, Claim, Payout } = require('./models');
 const { verifyChain, verifySingleRecord, GENESIS_PREV_HASH } = require('./chain');
 const InsuranceEngine = require('./insurance');
+const res = await fetch("http://127.0.0.1:8000/api/latest");
+const data = await res.json(); 
 
 const app = express();
 const server = http.createServer(app);
@@ -229,6 +231,8 @@ function adaptIoTPayload(raw, topic = '') {
     event = 'LID_OPEN';
   }
 
+  const boxId = String(raw.device_id || raw.box_id || 'ESP32-BOX').trim();
+
   return {
     valid: true,
     data: {
@@ -417,6 +421,23 @@ async function handleIncomingRecord(record, source = 'REST') {
       isMongoConnected ? Payout : null,
       io
     );
+
+    // 7. Publish decision response back to MQTT (for ESP32 / EMQX)
+    if (globalMqttClient && globalMqttClient.connected) {
+      const isBreached = record.event && record.event !== 'NONE';
+      const decisionPayload = {
+        box_id: boxId,
+        seq: record.seq,
+        delivery_decision: isBreached ? "NOT DELIVERED" : "DELIVERED",
+        risk_level: isBreached ? "HIGH_RISK" : "SAFE",
+        event: record.event,
+        temp_c: record.temp_c,
+        humidity: record.humidity,
+        shock: record.shock,
+        timestamp: record.ts
+      };
+      globalMqttClient.publish(`trustbox/${boxId}/decision`, JSON.stringify(decisionPayload));
+    }
 
     console.log(`[RECORD ${source}] ${boxId} #${seq} | Temp: ${record.temp_c}°C | Event: ${record.event} | Hash: ${record.hash.substring(0, 8)}...`);
     return { success: true, record: savedRecord };

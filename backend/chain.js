@@ -2,6 +2,26 @@ const crypto = require('crypto');
 
 const GENESIS_PREV_HASH = '0'.repeat(64);
 
+function normalizeFlag(value) {
+  if (value === null || value === undefined || value === '') {
+    return 0;
+  }
+
+  if (typeof value === 'boolean') {
+    return value ? 1 : 0;
+  }
+
+  if (typeof value === 'number') {
+    return Number.isFinite(value) && value !== 0 ? 1 : 0;
+  }
+
+  const stringValue = String(value).trim().toLowerCase();
+  if (['1', 'true', 'yes', 'y', 'on'].includes(stringValue)) {
+    return 1;
+  }
+  return 0;
+}
+
 /**
  * Builds canonical string formatted strictly according to spec:
  * box_id|seq|ts|temp_c|humidity|shock|tilt|flipped|light|lid_open|event|prev_hash
@@ -12,11 +32,11 @@ function buildCanonicalString(record) {
   const ts = parseInt(record.ts, 10);
   const tempC = Number(record.temp_c).toFixed(1);
   const humidity = Number(record.humidity).toFixed(1);
-  const shock = (record.shock === 1 || record.shock === true || record.shock === '1') ? 1 : 0;
-  const tilt = (record.tilt === 1 || record.tilt === true || record.tilt === '1') ? 1 : 0;
-  const flipped = (record.flipped === 1 || record.flipped === true || record.flipped === '1') ? 1 : 0;
+  const shock = normalizeFlag(record.shock);
+  const tilt = normalizeFlag(record.tilt);
+  const flipped = normalizeFlag(record.flipped);
   const light = parseInt(record.light, 10) || 0;
-  const lidOpen = (record.lid_open === 1 || record.lid_open === true || record.lid_open === '1') ? 1 : 0;
+  const lidOpen = normalizeFlag(record.lid_open);
   const event = (record.event && String(record.event).trim() !== '') ? String(record.event).trim() : 'NONE';
   const prevHash = String(record.prev_hash || GENESIS_PREV_HASH).toLowerCase();
 
