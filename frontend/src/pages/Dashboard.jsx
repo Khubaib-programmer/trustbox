@@ -269,25 +269,35 @@ export default function Dashboard() {
   // Status computation
   const isBroken = chainVerify && chainVerify.ok === false;
   const isDrop = latestRecord?.event === 'DROP' || latestRecord?.shock === 1;
-  const isTempBreach = latestRecord?.event === 'TEMP_BREACH' || (latestRecord?.temp_c > 8.0);
+  const isTempBreach = latestRecord?.event === 'TEMP_BREACH' || (latestRecord?.box_id?.startsWith('CAKE') && latestRecord?.temp_c > 8.0);
+  const isHumidityBreach = latestRecord?.event === 'HUMIDITY_BREACH' || (latestRecord?.humidity > 75.0 && latestRecord?.box_id?.startsWith('TV'));
   const isLidOpen = latestRecord?.event === 'LID_OPEN' || latestRecord?.lid_open === 1;
   const isFlipped = latestRecord?.event === 'FLIPPED' || latestRecord?.flipped === 1;
+  const isHighRisk = isDrop || isTempBreach || isHumidityBreach || isBroken || claims.length > 0;
 
   let statusSentenceStart = "Your delivery is ";
   let statusKeyword = "safe.";
   let statusTone = "safe";
 
   if (isBroken) {
-    statusSentenceStart = "Records were ";
-    statusKeyword = "tampered with.";
+    statusSentenceStart = "Security Breach — ";
+    statusKeyword = "NOT DELIVERED (Records Tampered).";
+    statusTone = "danger";
+  } else if (isDrop && isTempBreach) {
+    statusSentenceStart = "High Risk Damage — ";
+    statusKeyword = "NOT DELIVERED (Shock Impact & Melted).";
     statusTone = "danger";
   } else if (isTempBreach) {
-    statusSentenceStart = "Temperature is ";
-    statusKeyword = "too high.";
+    statusSentenceStart = "High Risk Spoilage — ";
+    statusKeyword = "NOT DELIVERED (Temperature Breached).";
+    statusTone = "danger";
+  } else if (isHumidityBreach) {
+    statusSentenceStart = "High Risk Damage — ";
+    statusKeyword = "NOT DELIVERED (Moisture Hazard).";
     statusTone = "danger";
   } else if (isDrop) {
-    statusSentenceStart = "Package was ";
-    statusKeyword = "dropped.";
+    statusSentenceStart = "High Risk Impact — ";
+    statusKeyword = "NOT DELIVERED (Heavy Shock / Dropped).";
     statusTone = "danger";
   } else if (isLidOpen) {
     statusSentenceStart = "Box lid was ";
@@ -314,6 +324,8 @@ export default function Dashboard() {
 
   const currentTemp = latestRecord?.temp_c ?? 4.8;
   const currentHumidity = latestRecord?.humidity ?? 52.0;
+  const currentShock = latestRecord?.shock ?? 0;
+  const hasShock = currentShock === 1 || latestRecord?.event === 'DROP';
   const tempProgress = Math.min(Math.max((currentTemp / 16) * 100, 0), 100);
 
   // Timeline events mapping (human titles, newest first)
@@ -324,6 +336,7 @@ export default function Dashboard() {
     switch (event) {
       case 'DROP': return 'Package dropped';
       case 'TEMP_BREACH': return 'Temperature went above limit';
+      case 'HUMIDITY_BREACH': return 'Humidity exceeded limit (Damage risk)';
       case 'LID_OPEN': return 'Lid was opened';
       case 'FLIPPED': return 'Package was flipped';
       default: return 'Everything normal';
@@ -465,6 +478,19 @@ export default function Dashboard() {
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
             {/* Left: Giant status sentence */}
             <div className="max-w-xl">
+              <div className="mb-3 flex items-center gap-2">
+                <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold tracking-wide uppercase shadow-sm ${
+                  isHighRisk ? 'bg-danger text-white' : 'bg-safe text-white'
+                }`}>
+                  {isHighRisk ? '❌ NOT DELIVERED' : '✅ DELIVERED SAFELY'}
+                </span>
+                {isHighRisk && (
+                  <span className="text-xs font-semibold text-danger uppercase tracking-wider">
+                    High Risk: Cargo Compromised
+                  </span>
+                )}
+              </div>
+
               <h1 className="text-[34px] sm:text-[44px] lg:text-[48px] font-semibold tracking-tighter leading-tight text-ink">
                 <span>{statusSentenceStart}</span>
                 <span className={heroStatusTextColors}>{statusKeyword}</span>
@@ -504,13 +530,13 @@ export default function Dashboard() {
           </div>
         </section>
 
-        {/* C) KPI Row (4 Equal Minimal Tiles) */}
-        <section className="grid grid-cols-2 lg:grid-cols-4 gap-6 sm:gap-8 py-2 border-y border-hairline">
+        {/* C) KPI Row (5 Minimal Tiles with Shock Sensor beside Temp & Humidity) */}
+        <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-6 sm:gap-6 py-2 border-y border-hairline">
           <KpiTile 
             label="Temperature"
             value={currentTemp.toFixed(1)}
             unit="°C"
-            delta={currentTemp <= 8.0 ? "Safe threshold" : "Limit exceeded"}
+            delta={currentTemp <= 8.0 ? "Safe cold chain" : "Limit exceeded"}
             statusTone={currentTemp <= 8.0 ? "safe" : "danger"}
           />
 
@@ -518,7 +544,16 @@ export default function Dashboard() {
             label="Humidity"
             value={currentHumidity.toFixed(1)}
             unit="%"
-            delta="Nominal air humidity"
+            delta={currentHumidity <= 75.0 ? "Nominal humidity" : "Limit exceeded"}
+            statusTone={currentHumidity <= 75.0 ? "safe" : "danger"}
+          />
+
+          <KpiTile 
+            label="Shock / Drop"
+            value={hasShock ? "DETECTED" : "None"}
+            statusIcon={hasShock ? AlertTriangle : Check}
+            statusTone={hasShock ? "danger" : "safe"}
+            delta={hasShock ? "SW-420 Impact > 3G" : "Stable sensor (0G)"}
           />
 
           <KpiTile 

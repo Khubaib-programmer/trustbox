@@ -92,7 +92,11 @@ class InsuranceEngine {
     }
 
     // 2. Check TEMPERATURE BREACH
-    const tempExceeded = record.temp_c > this.claimTempC;
+    // Perishable goods (CAKE, cold chain pharmaceuticals) have cold-chain <= 8°C limit.
+    // General dry cargo / electronics (TV, BOOKS) have normal industrial heat limit (50°C).
+    const isColdChain = !boxId.toUpperCase().startsWith('TV') && !boxId.toUpperCase().startsWith('BOOKS');
+    const tempThreshold = isColdChain ? this.claimTempC : 50.0;
+    const tempExceeded = record.temp_c > tempThreshold || record.event === 'TEMP_BREACH';
 
     if (tempExceeded) {
       if (state.tempExceedStartTs === null) {
@@ -113,7 +117,7 @@ class InsuranceEngine {
             box_id: boxId,
             type: 'TEMP_BREACH',
             status: 'APPROVED',
-            reason: `Temperature exceeded ${this.claimTempC}°C for ${elapsedSec}s (Threshold: ${this.claimWindowSec}s, Current: ${record.temp_c}°C)`,
+            reason: `Temperature exceeded ${tempThreshold}°C for ${elapsedSec}s (Threshold: ${this.claimWindowSec}s, Current: ${record.temp_c}°C) - Cargo Spoiled, Returned`,
             triggerSeq: record.seq,
             ts: record.ts,
             createdAt: new Date()
@@ -131,7 +135,7 @@ class InsuranceEngine {
             amount_inr: 50000,
             currency: 'INR',
             status: 'TRANSFERRED',
-            beneficiary: 'PharmaSupply Logistics Ltd.',
+            beneficiary: 'CakeCraft Confectionery Ltd.',
             timestamp: new Date()
           };
 
@@ -156,6 +160,62 @@ class InsuranceEngine {
       // Temperature returned to normal before window elapsed
       if (!state.hasTempClaim) {
         state.tempExceedStartTs = null;
+      }
+    }
+
+    // 3. Check HUMIDITY BREACH (Critical for Electronics / TV)
+    const humidityThreshold = 75.0; // Standard electronics humidity limit %
+    const humidityExceeded = (record.humidity > humidityThreshold) || (record.event === 'HUMIDITY_BREACH');
+
+    if (humidityExceeded && !state.hasHumidityClaim) {
+      let existingClaim = null;
+      if (ClaimModel) {
+        existingClaim = await ClaimModel.findOne({ box_id: boxId, type: 'HUMIDITY_BREACH' });
+      }
+
+      if (!existingClaim) {
+        state.hasHumidityClaim = true;
+        const claimData = {
+          box_id: boxId,
+          type: 'HUMIDITY_BREACH',
+          status: 'APPROVED',
+          reason: `High humidity breach detected: ${record.humidity}% (Threshold: ${humidityThreshold}%) - Circuit Short Risk, Returned`,
+          triggerSeq: record.seq,
+          ts: record.ts,
+          createdAt: new Date()
+        };
+
+        let savedClaim = claimData;
+        if (ClaimModel) {
+          savedClaim = await ClaimModel.create(claimData);
+        }
+
+        const payoutData = {
+          payout_id: this.generatePayoutId(),
+          claim_id: String(savedClaim._id || savedClaim.triggerSeq || 'claim_humidity'),
+          box_id: boxId,
+          amount_inr: 30000,
+          currency: 'INR',
+          status: 'TRANSFERRED',
+          beneficiary: 'Sony Electronics Logistics Ltd.',
+          timestamp: new Date()
+        };
+
+        let savedPayout = payoutData;
+        if (PayoutModel) {
+          savedPayout = await PayoutModel.create(payoutData);
+        }
+
+        console.log(`[INSURANCE] HUMIDITY_BREACH Claim APPROVED for ${boxId} -> Payout ${savedPayout.payout_id} (₹${savedPayout.amount_inr})`);
+
+        if (io) {
+          io.emit('claim', savedClaim);
+          io.emit('payout', savedPayout);
+        }
+
+        this.onClaimApproved(savedClaim, savedPayout);
+      } else {
+        state.hasHumidityClaim = true;
       }
     }
   }

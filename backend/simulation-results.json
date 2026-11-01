@@ -1,0 +1,122 @@
+{
+  "simulationTimestamp": "2026-11-01T01:11:22.469Z",
+  "backendUrl": "http://localhost:4000",
+  "allTestsPassed": true,
+  "results": [
+    {
+      "boxId": "CAKE-001",
+      "item": "🎂 Cream Cake (Perishable Cold-Chain)",
+      "category": "Perishable Food",
+      "description": "Requires cold chain ≤ 8.0°C & gentle handling. Suffers multiple severe shock impacts (SW-420 > 4G) + cooler failure (16°C).",
+      "recordsSent": 6,
+      "chainVerified": true,
+      "actualOutcome": "NOT DELIVERED",
+      "expectedOutcome": "NOT DELIVERED",
+      "testPassed": true,
+      "claims": [
+        {
+          "_id": "6ae691a2f9ac6042a773c20e",
+          "box_id": "CAKE-001",
+          "type": "TEMP_BREACH",
+          "status": "APPROVED",
+          "reason": "Temperature exceeded 8°C for 17s (Threshold: 15s, Current: 16.5°C) - Cargo Spoiled, Returned",
+          "triggerSeq": 5,
+          "ts": 1793495477,
+          "createdAt": "2026-11-01T01:10:58.333Z",
+          "__v": 0
+        },
+        {
+          "_id": "6ae6919ff9ac6042a773c200",
+          "box_id": "CAKE-001",
+          "type": "DROP",
+          "status": "APPROVED",
+          "reason": "High impact drop detected at seq #3 (Shock: 1)",
+          "triggerSeq": 3,
+          "ts": 1793495460,
+          "createdAt": "2026-11-01T01:10:55.971Z",
+          "__v": 0
+        }
+      ],
+      "payouts": [
+        {
+          "_id": "6ae691a2f9ac6042a773c210",
+          "payout_id": "pay_wqsyr467hy59",
+          "claim_id": "6ae691a2f9ac6042a773c20e",
+          "box_id": "CAKE-001",
+          "amount_inr": 50000,
+          "currency": "INR",
+          "status": "TRANSFERRED",
+          "beneficiary": "CakeCraft Confectionery Ltd.",
+          "timestamp": "2026-11-01T01:10:58.380Z",
+          "__v": 0
+        },
+        {
+          "_id": "6ae691a0f9ac6042a773c202",
+          "payout_id": "pay_3ors2qtoqjsi",
+          "claim_id": "6ae6919ff9ac6042a773c200",
+          "box_id": "CAKE-001",
+          "amount_inr": 25000,
+          "currency": "INR",
+          "status": "TRANSFERRED",
+          "beneficiary": "PharmaSupply Logistics Ltd.",
+          "timestamp": "2026-11-01T01:10:56.019Z",
+          "__v": 0
+        }
+      ],
+      "totalPayoutINR": 75000
+    },
+    {
+      "boxId": "TV-001",
+      "item": "📺 55\" OLED Smart TV (Electronics)",
+      "category": "Sensitive Electronics",
+      "description": "Requires dry storage ≤ 75% humidity. Heavy rain causes water leakage in container.",
+      "recordsSent": 4,
+      "chainVerified": true,
+      "actualOutcome": "NOT DELIVERED",
+      "expectedOutcome": "NOT DELIVERED",
+      "testPassed": true,
+      "claims": [
+        {
+          "_id": "6ae691aaf9ac6042a773c22b",
+          "box_id": "TV-001",
+          "type": "HUMIDITY_BREACH",
+          "status": "APPROVED",
+          "reason": "High humidity breach detected: 88% (Threshold: 75%) - Circuit Short Risk, Returned",
+          "triggerSeq": 3,
+          "ts": 1793495471,
+          "createdAt": "2026-11-01T01:11:06.757Z",
+          "__v": 0
+        }
+      ],
+      "payouts": [
+        {
+          "_id": "6ae691aaf9ac6042a773c22d",
+          "payout_id": "pay_h58smoefmu72",
+          "claim_id": "6ae691aaf9ac6042a773c22b",
+          "box_id": "TV-001",
+          "amount_inr": 30000,
+          "currency": "INR",
+          "status": "TRANSFERRED",
+          "beneficiary": "Sony Electronics Logistics Ltd.",
+          "timestamp": "2026-11-01T01:11:06.806Z",
+          "__v": 0
+        }
+      ],
+      "totalPayoutINR": 30000
+    },
+    {
+      "boxId": "BOOKS-001",
+      "item": "📚 Educational Hardcover Books (Dry Goods)",
+      "category": "Non-Perishable Goods",
+      "description": "Standard cargo with no temperature sensitivity. Delivered safely without incident.",
+      "recordsSent": 6,
+      "chainVerified": true,
+      "actualOutcome": "DELIVERED",
+      "expectedOutcome": "DELIVERED",
+      "testPassed": true,
+      "claims": [],
+      "payouts": [],
+      "totalPayoutINR": 0
+    }
+  ]
+}
