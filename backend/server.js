@@ -421,7 +421,7 @@ async function handleIncomingRecord(record, source = 'REST') {
     );
 
     // 7. Publish decision response back to MQTT (for ESP32 / EMQX)
-    if (globalMqttClient && globalMqttClient.connected) {
+    if (mqttClient && mqttClient.connected) {
       const isBreached = record.event && record.event !== 'NONE';
       const decisionPayload = {
         box_id: boxId,
@@ -434,7 +434,7 @@ async function handleIncomingRecord(record, source = 'REST') {
         shock: record.shock,
         timestamp: record.ts
       };
-      globalMqttClient.publish(`trustbox/${boxId}/decision`, JSON.stringify(decisionPayload));
+      mqttClient.publish(`trustbox/${boxId}/decision`, JSON.stringify(decisionPayload));
     }
 
     console.log(`[RECORD ${source}] ${boxId} #${seq} | Temp: ${record.temp_c}°C | Event: ${record.event} | Hash: ${record.hash.substring(0, 8)}...`);
