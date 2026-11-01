@@ -34,6 +34,7 @@ import QRCodeModal from '../components/QRCodeModal';
 import KpiTile from '../components/KpiTile';
 import StatusPill from '../components/StatusPill';
 import Skeleton from '../components/Skeleton';
+import { API_BASE_URL, SOCKET_URL } from '../config';
 
 export default function Dashboard() {
   const [boxId, setBoxId] = useState('TB-001');
@@ -99,7 +100,7 @@ export default function Dashboard() {
   // Fetch all known box IDs in system to populate selector
   const fetchBoxes = async () => {
     try {
-      const res = await fetch('/api/boxes');
+      const res = await fetch(`${API_BASE_URL}/api/boxes`);
       if (res.ok) {
         const data = await res.json();
         if (data.boxes && Array.isArray(data.boxes)) {
@@ -144,10 +145,10 @@ export default function Dashboard() {
 
     try {
       const [recRes, claimRes, payRes, verifyRes] = await Promise.all([
-        fetch(`/api/records/${encodeURIComponent(targetBox)}?limit=200`),
-        fetch(`/api/claims/${encodeURIComponent(targetBox)}`),
-        fetch(`/api/payouts/${encodeURIComponent(targetBox)}`),
-        fetch(`/api/verify/${encodeURIComponent(targetBox)}`)
+        fetch(`${API_BASE_URL}/api/records/${encodeURIComponent(targetBox)}?limit=200`),
+        fetch(`${API_BASE_URL}/api/claims/${encodeURIComponent(targetBox)}`),
+        fetch(`${API_BASE_URL}/api/payouts/${encodeURIComponent(targetBox)}`),
+        fetch(`${API_BASE_URL}/api/verify/${encodeURIComponent(targetBox)}`)
       ]);
 
       if (requestId !== activeRequestIdRef.current || targetBox !== activeBoxRef.current) {
@@ -209,7 +210,7 @@ export default function Dashboard() {
     fetchBoxes();
     fetchData(boxId);
 
-    const socket = io();
+    const socket = SOCKET_URL ? io(SOCKET_URL, { transports: ['websocket', 'polling'] }) : io();
 
     socket.on('connect', () => setIsConnected(true));
     socket.on('disconnect', () => setIsConnected(false));
@@ -228,7 +229,7 @@ export default function Dashboard() {
         });
         setLatestRecord(newRecord);
         // Refresh verify state quietly
-        fetch(`/api/verify/${encodeURIComponent(activeBoxRef.current)}`)
+        fetch(`${API_BASE_URL}/api/verify/${encodeURIComponent(activeBoxRef.current)}`)
           .then((r) => r.json())
           .then((v) => setChainVerify(v))
           .catch(() => {});
@@ -293,7 +294,7 @@ export default function Dashboard() {
     setIsTamperLoading(true);
     setTamperSuccessMsg(null);
     try {
-      const res = await fetch(`/api/admin/tamper/${encodeURIComponent(boxId)}/${seqToTamper}`, {
+      const res = await fetch(`${API_BASE_URL}/api/admin/tamper/${encodeURIComponent(boxId)}/${seqToTamper}`, {
         method: 'POST'
       });
       const data = await res.json();
