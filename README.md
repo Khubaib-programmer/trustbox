@@ -527,10 +527,11 @@ Output is placed in `frontend/dist/`. Serve with any static hosting (Vercel, Net
 | `PORT` | No | `4000` | Express server port |
 | `MONGODB_URI` | **Yes** | local mongo | MongoDB Atlas connection string |
 | `MONGO_URI` | No | same as above | Alias fallback for MongoDB URI |
-| `MQTT_URL` | No | *(MQTT disabled)* | HiveMQ broker URL e.g. `mqtts://xxx.hivemq.cloud:8883` |
+| `MQTT_URL` | No | *(MQTT disabled)* | EMQX Cloud broker URL e.g. `mqtts://xxx.emqxsl.com:8883` |
 | `MQTT_USER` | No* | — | MQTT broker username (*required if MQTT_URL is set) |
 | `MQTT_PASS` | No* | — | MQTT broker password (*required if MQTT_URL is set) |
-| `IOT_MQTT_TOPIC` | No | `trustbox/raw/#` | MQTT topic for raw IoT hardware payloads |
+| `MQTT_CA_PATH` | No | *(system CA)* | Path to EMQX Cloud CA root certificate file (optional) |
+| `IOT_MQTT_TOPIC` | No | `trustbox/raw/#` | Comma-separated topics for raw IoT hardware payloads |
 | `DEVICE_KEY` | No | `trustbox-super-secret-key-32ch` | Shared HMAC secret — **must match firmware** |
 | `CLAIM_TEMP_C` | No | `8.0` | Temperature breach threshold in °C |
 | `CLAIM_WINDOW_SEC` | No | `15` | Seconds above threshold before claim fires |
@@ -539,9 +540,37 @@ Output is placed in `frontend/dist/`. Serve with any static hosting (Vercel, Net
 
 ---
 
-## 13. MQTT Integration Guide
+## 13. MQTT Integration Guide (EMQX Cloud & HiveMQ)
 
-### Setting Up HiveMQ Cloud (Free)
+TrustBox connects securely over **TLS on port 8883** to any managed MQTT broker, optimized specifically for **EMQX Cloud Serverless/Dedicated** and **HiveMQ Cloud**.
+
+### EMQX Cloud Setup
+1. **Locate Broker Host & Port:**
+   - Log into [EMQX Cloud Console](https://cloud.emqx.com/) and navigate to your Deployment Overview.
+   - Find your **Connect Address** (e.g., `xxx.emqxsl.com`) and **Port** (`8883` for TLS).
+   - Set in `backend/.env`:
+     ```env
+     MQTT_URL=mqtts://xxx.emqxsl.com:8883
+     ```
+2. **Create Authentication User:**
+   - In EMQX Console, go to **Authentication** → **Users** → **Add User**.
+   - Set a dedicated Username and a secure Password.
+   - Enter credentials in `backend/.env`:
+     ```env
+     MQTT_USER=your_emqx_username
+     MQTT_PASS=your_emqx_password
+     ```
+3. **CA Certificate (Optional):**
+   - EMQX Cloud TLS endpoints work automatically with Node.js's standard root CA store (`rejectUnauthorized: true`).
+   - If your deployment uses a custom CA certificate, download the root CA `.crt`/`.pem` from the EMQX deployment page, save it locally (e.g., `backend/emqx-ca.crt`), and set:
+     ```env
+     MQTT_CA_PATH=/absolute/path/to/emqx-ca.crt
+     ```
+4. **Security Notice:**
+   - ⚠️ **Always rotate any credentials that were ever pasted into chat, logs, or screenshots.**
+   - Never commit `.env` files or password strings to git.
+
+### HiveMQ Cloud Alternative (Free)
 1. Sign up at [hivemq.com/mqtt-cloud-broker](https://www.hivemq.com/mqtt-cloud-broker/)
 2. Create a cluster → copy the **Cluster URL** (e.g., `abc123.s1.eu.hivemq.cloud`)
 3. Go to **Access Management** → Create a username and password
@@ -551,13 +580,6 @@ Output is placed in `frontend/dist/`. Serve with any static hosting (Vercel, Net
    MQTT_USER=your_username
    MQTT_PASS=your_password
    ```
-5. Restart the backend — you should see:
-   ```
-   ✅ Connected to HiveMQ / MQTT Broker!
-   ✅ Subscribed to trustbox/+/telemetry  (signed TrustBox records)
-   ✅ Subscribed to trustbox/+/event      (signed TrustBox records)
-   ✅ Subscribed to trustbox/raw/#        (raw IoT hardware payloads)
-   ```
 
 ### Topics the Backend Subscribes To
 
@@ -565,13 +587,13 @@ Output is placed in `frontend/dist/`. Serve with any static hosting (Vercel, Net
 |---|---|---|
 | `trustbox/+/telemetry` | Fully signed TrustBox record (includes `hash`, `sig`, `seq`) | ESP32 firmware, fake-publisher in MQTT mode |
 | `trustbox/+/event` | Fully signed TrustBox record (same format, event anomalies) | ESP32 firmware on breach |
-| `trustbox/raw/#` | Raw IoT sensor JSON (no `hash`/`sig`/`seq` required) | Any IoT device with `device_id` field |
+| `trustbox/raw/#` (configurable) | Raw IoT sensor JSON (no `hash`/`sig`/`seq` required) | ESP32 hardware, test scripts, IoT devices |
 
 ### MQTT Message Routing Logic
 When a message arrives, the backend checks:
 ```
-payload.device_id exists AND payload.hash is missing
-  → Raw IoT path: adapt + compute chain server-side → ingest
+payload.device_id exists (or derived from topic) AND payload.hash is missing
+  → Raw IoT path: adapt + validate + compute chain server-side → ingest
   → Otherwise: standard signed TrustBox path → verify + ingest
 ```
 
@@ -817,6 +839,19 @@ curl -X POST http://localhost:4000/api/admin/reset/TB-NEW-DEVICE
 ```bash
 curl http://localhost:4000/health
 ```
+Returns `{ status, mongo, mqtt, time }`.
+
+#### `GET /api/mqtt/status` — Live MQTT Connection & Telemetry Status
+```bash
+curl http://localhost:4000/api/mqtt/status
+```
+Returns `{ enabled, connected, broker_host, subscribed_topics, messages_received, messages_accepted, messages_rejected, last_message_at, last_device_id, last_error }`.
+
+#### `GET /api/mqtt/rejected` — Rejected / Invalid Payloads Log
+```bash
+curl http://localhost:4000/api/mqtt/rejected
+```
+Returns ring buffer of last 20 rejected messages with reasons and timestamps.
 
 ---
 
@@ -831,6 +866,8 @@ The backend broadcasts these events to all connected browser clients.
 | `claim` | Claim object | When insurance claim is auto-approved |
 | `payout` | Payout object | When payout is created |
 | `tamper` | `{ box_id, seq, new_temp }` | When admin tamper endpoint is called |
+| `reset` | `{ box_id }` | When reset endpoint is called |
+| `mqtt_status` | `{ connected, last_message_at }` | When broker connection state changes and every 5 seconds |
 | `reset` | `{ box_id }` | When reset endpoint is called |
 
 ### Connecting from Frontend

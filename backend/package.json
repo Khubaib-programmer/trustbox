@@ -11,7 +11,8 @@
     "simulate:drop": "node fake-publisher.js --drop",
     "test": "node test-chain.js",
     "test:chain": "node test-chain.js",
-    "test:api": "node test-api.js"
+    "test:api": "node test-api.js",
+    "test:emqx": "node test-emqx.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

@@ -1,4 +1,5 @@
 require('dotenv').config();
+const fs = require('fs');
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -27,15 +28,66 @@ const io = new Server(server, {
 // Environment Configuration
 const PORT = process.env.PORT || 4000;
 const MONGO_URI = process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/trustbox';
-const MQTT_URL = process.env.MQTT_URL; // e.g. mqtts://xxxx.hivemq.cloud:8883
+const MQTT_URL = process.env.MQTT_URL; // e.g. mqtts://xxxx.emqxsl.com:8883
 const MQTT_USER = process.env.MQTT_USER;
 const MQTT_PASS = process.env.MQTT_PASS;
+const MQTT_CA_PATH = process.env.MQTT_CA_PATH;
 const DEVICE_KEY = process.env.DEVICE_KEY || 'trustbox-super-secret-key-32ch';
 const CLAIM_TEMP_C = parseFloat(process.env.CLAIM_TEMP_C) || 8.0;
 const CLAIM_WINDOW_SEC = parseInt(process.env.CLAIM_WINDOW_SEC, 10) || 15;
-// IoT raw topic — the exact topic your hardware publishes to
-// e.g. "box-001/telemetry" or "trustbox/raw" or "#" (wildcard all)
+// IoT raw topic — comma-separated list of topics or wildcards
 const IOT_MQTT_TOPIC = process.env.IOT_MQTT_TOPIC || 'trustbox/raw/#';
+
+// MQTT Runtime State & Diagnostics
+let mqttClient = null;
+let mqttConnected = false;
+const subscribedTopics = [];
+const mqttStats = {
+  messages_received: 0,
+  messages_accepted: 0,
+  messages_rejected: 0,
+  last_message_at: null,
+  last_device_id: null,
+  last_error: null
+};
+const rejectedMessages = []; // Ring buffer of last 20 rejected/invalid messages
+
+function recordRejection(topic, reason, rawPayload) {
+  mqttStats.messages_rejected++;
+  const entry = {
+    topic: String(topic || 'unknown'),
+    reason: String(reason || 'Unknown rejection reason'),
+    timestamp: new Date().toISOString(),
+    payload: typeof rawPayload === 'string'
+      ? rawPayload.slice(0, 200)
+      : JSON.stringify(rawPayload).slice(0, 200)
+  };
+  rejectedMessages.unshift(entry);
+  if (rejectedMessages.length > 20) {
+    rejectedMessages.pop();
+  }
+  console.warn(`⚠️ [MQTT REJECTED] on ${topic}: ${reason}`);
+}
+
+// In-memory per-device serialization queue to prevent sequence collisions
+const deviceIngestionQueues = new Map();
+
+function enqueueDeviceIngestion(boxId, taskFn) {
+  const previousPromise = deviceIngestionQueues.get(boxId) || Promise.resolve();
+  const nextPromise = previousPromise
+    .then(() => taskFn())
+    .catch((err) => {
+      console.error(`[INGESTION QUEUE ERROR] ${boxId}:`, err);
+      throw err;
+    });
+  deviceIngestionQueues.set(boxId, nextPromise);
+  nextPromise.finally(() => {
+    if (deviceIngestionQueues.get(boxId) === nextPromise) {
+      deviceIngestionQueues.delete(boxId);
+    }
+  });
+  return nextPromise;
+}
 
 // In-memory fallback if MongoDB is offline during hackathon demo
 let isMongoConnected = false;
@@ -84,96 +136,156 @@ async function getLatestBoxRecord(boxId) {
   }
 }
 
+function normalizeBool(v) {
+  if (v === true || v === 1 || v === '1' || v === 'true') return 1;
+  return 0;
+}
+
+function findFirstNumber(obj, keys) {
+  for (const k of keys) {
+    if (obj[k] !== undefined && obj[k] !== null && obj[k] !== '') {
+      const num = Number(obj[k]);
+      if (Number.isFinite(num)) {
+        return num;
+      }
+    }
+  }
+  return null;
+}
+
 /**
  * Maps raw IoT device payload → TrustBox internal schema.
- * Handles field renames, boolean→int coercion, sensor selection,
- * and event string derivation.
- *
- * IoT device fields:
- *   device_id, uptime_ms, temperature_dht_c, humidity_pct,
- *   temperature_ds18b20_c, photo_raw, light_inside, shock, tilt,
- *   ball_switch, reed_triggered, delivery_button, breach
+ * Tolerant of field variants, validates physical ranges (-40 to 125 C, 0 to 100 % humidity),
+ * extracts device_id with topic fallback, and prioritizes breach/alarm events.
  */
-function adaptIoTPayload(raw) {
-  // Prefer DS18B20 (more accurate probe) if present and valid, else fall back to DHT
-  const temp_c = (raw.temperature_ds18b20_c != null && !isNaN(raw.temperature_ds18b20_c))
-    ? parseFloat(Number(raw.temperature_ds18b20_c).toFixed(1))
-    : parseFloat(Number(raw.temperature_dht_c).toFixed(1));
+function adaptIoTPayload(raw, topic = '') {
+  if (!raw || typeof raw !== 'object') {
+    return { valid: false, reason: 'Payload must be a non-empty object.' };
+  }
 
-  const humidity = parseFloat(Number(raw.humidity_pct).toFixed(1));
+  // 1. Device ID extraction with topic fallback (trustbox/raw/TB-DEMO-01 -> TB-DEMO-01)
+  let deviceId = raw.device_id || raw.box_id || raw.boxId;
+  if (!deviceId && topic) {
+    const segments = String(topic).split('/').filter(Boolean);
+    const lastSeg = segments[segments.length - 1];
+    if (lastSeg && lastSeg !== '#' && lastSeg !== '+') {
+      deviceId = lastSeg;
+    }
+  }
+  if (!deviceId || typeof deviceId !== 'string' || !deviceId.trim()) {
+    return { valid: false, reason: 'Field "device_id" missing and could not be determined from topic.' };
+  }
+  deviceId = String(deviceId).trim();
 
-  // Booleans → 0/1
-  const b = (v) => (v === true || v === 1 || v === '1') ? 1 : 0;
+  // 2. Temperature resolution & validation (-40 to 125 C)
+  // Priority: temperature_ds18b20_c, temperature_dht_c, temperature_c, temperature, temp_c, temp
+  const tempKeys = ['temperature_ds18b20_c', 'temperature_dht_c', 'temperature_c', 'temperature', 'temp_c', 'temp'];
+  const rawTemp = findFirstNumber(raw, tempKeys);
+  if (rawTemp === null || rawTemp < -40 || rawTemp > 125) {
+    return {
+      valid: false,
+      reason: `Invalid temperature value: ${rawTemp} (must be a finite number between -40°C and 125°C)`
+    };
+  }
+  const temp_c = parseFloat(rawTemp.toFixed(1));
 
-  const shock     = b(raw.shock);
-  const tilt      = b(raw.tilt) || b(raw.ball_switch);   // ball_switch = tilt sensor
-  const flipped   = b(raw.tilt) && b(raw.ball_switch) ? 1 : 0; // both active = flipped
-  const lid_open  = b(raw.reed_triggered);               // reed switch = magnetic lid sensor
-  const light     = parseInt(raw.photo_raw, 10) || 0;   // raw lux/ADC reading
+  // 3. Humidity resolution & validation (0 to 100 %)
+  // Priority: humidity_pct, humidity
+  const humKeys = ['humidity_pct', 'humidity'];
+  const rawHum = findFirstNumber(raw, humKeys);
+  if (rawHum === null || rawHum < 0 || rawHum > 100) {
+    return {
+      valid: false,
+      reason: `Invalid humidity value: ${rawHum} (must be a finite number between 0% and 100%)`
+    };
+  }
+  const humidity = parseFloat(rawHum.toFixed(1));
 
-  // Derive event string from breach flags
+  // 4. Sensor Flags & Booleans normalization (supports true/false, 1/0, "true"/"false", "1"/"0")
+  const shock = normalizeBool(raw.shock);
+  const tilt = normalizeBool(raw.tilt);
+  const ball_switch = normalizeBool(raw.ball_switch);
+  const flipped = (normalizeBool(raw.flipped) === 1 || (tilt === 1 && ball_switch === 1)) ? 1 : 0;
+  
+  // lid_open: reed_triggered or lid_open
+  const lid_open = (raw.reed_triggered !== undefined) 
+    ? normalizeBool(raw.reed_triggered) 
+    : normalizeBool(raw.lid_open);
+
+  // light: photo_raw or light
+  const rawLight = findFirstNumber(raw, ['photo_raw', 'light']);
+  const light = rawLight !== null ? Math.max(0, Math.round(rawLight)) : 0;
+
+  // 5. Event derivation priority:
+  // breach -> TEMP_BREACH, shock -> DROP, tilt or ball_switch -> FLIPPED, reed_triggered -> LID_OPEN, otherwise NONE
   let event = 'NONE';
-  if (raw.breach === true || raw.breach === 1) {
-    if (temp_c > CLAIM_TEMP_C)       event = 'TEMP_BREACH';
-    else if (shock)                   event = 'DROP';
-    else if (flipped)                 event = 'FLIPPED';
-    else if (lid_open)                event = 'LID_OPEN';
-    else                              event = 'TEMP_BREACH'; // fallback
-  } else if (shock)   event = 'DROP';
-  else if (flipped)   event = 'FLIPPED';
-  else if (lid_open)  event = 'LID_OPEN';
+  if (normalizeBool(raw.breach) === 1) {
+    event = 'TEMP_BREACH';
+  } else if (shock === 1) {
+    event = 'DROP';
+  } else if (tilt === 1 || ball_switch === 1 || flipped === 1) {
+    event = 'FLIPPED';
+  } else if (lid_open === 1) {
+    event = 'LID_OPEN';
+  }
 
   return {
-    box_id:   String(raw.device_id || 'box-001').trim(),
-    ts:       Math.floor(Date.now() / 1000),   // server timestamp (seconds)
-    temp_c,
-    humidity,
-    shock,
-    tilt,
-    flipped,
-    light,
-    lid_open,
-    event,
-    // seq, prev_hash, hash, sig are computed server-side in ingestIoTRecord()
+    valid: true,
+    data: {
+      box_id: deviceId,
+      ts: Math.floor(Date.now() / 1000), // server timestamp in seconds
+      temp_c,
+      humidity,
+      shock,
+      tilt,
+      flipped,
+      light,
+      lid_open,
+      event
+    }
   };
 }
 
 /**
  * Server-side chain computation + ingestion for raw IoT payloads.
- * The IoT device does NOT send seq/hash/sig — the backend computes them.
+ * Serialized per device_id using an in-memory queue to prevent duplicate sequence creation.
  */
 const { signRecord, buildCanonicalString, computeHash, computeSignature } = require('./chain');
 
-async function ingestIoTRecord(rawIoT, source = 'IOT-MQTT') {
-  let adapted;
-  try {
-    adapted = adaptIoTPayload(rawIoT);
-  } catch (e) {
-    console.error(`[IOT ADAPT ERROR] Failed mapping IoT payload: ${e.message}`);
-    return { success: false, error: e.message };
+async function ingestIoTRecord(rawIoT, source = 'IOT-MQTT', topic = '') {
+  const adaptResult = adaptIoTPayload(rawIoT, topic);
+  if (!adaptResult.valid) {
+    recordRejection(topic || source, adaptResult.reason, rawIoT);
+    return { success: false, status: 400, error: adaptResult.reason };
   }
 
+  const adapted = adaptResult.data;
   const boxId = adapted.box_id;
 
-  // Get latest chain state to determine next seq + prev_hash
-  const latest = await getLatestBoxRecord(boxId);
-  const seq       = latest ? latest.seq + 1 : 0;
-  const prev_hash = latest ? latest.hash : GENESIS_PREV_HASH;
+  // Enqueue per boxId to serialize hash-chain calculation
+  return enqueueDeviceIngestion(boxId, async () => {
+    // Get latest chain state to determine next seq + prev_hash
+    const latest = await getLatestBoxRecord(boxId);
+    const seq = latest ? latest.seq + 1 : 0;
+    const prev_hash = latest ? latest.hash : GENESIS_PREV_HASH;
 
-  // Assemble full record
-  const rawRecord = { ...adapted, seq, prev_hash };
+    // Assemble full record
+    const rawRecord = { ...adapted, seq, prev_hash };
 
-  // Compute hash + HMAC signature server-side
-  const signed = signRecord(rawRecord, DEVICE_KEY);
+    // Compute hash + HMAC signature server-side
+    const signed = signRecord(rawRecord, DEVICE_KEY);
 
-  // Pass through the normal ingestion pipeline
-  const result = await handleIncomingRecord(signed, source);
-  if (result.success) {
-    console.log(`[IOT ${source}] ${boxId} #${seq} | Temp: ${signed.temp_c}°C | Event: ${signed.event}`);
-  } else {
-    console.warn(`[IOT INGEST FAILED] ${boxId} #${seq}: ${result.error}`);
-  }
-  return result;
+    // Pass through the normal ingestion pipeline
+    const result = await handleIncomingRecord(signed, source);
+    if (result.success) {
+      mqttStats.messages_accepted++;
+      mqttStats.last_device_id = boxId;
+      console.log(`[IOT ${source}] ${boxId} #${seq} | Temp: ${signed.temp_c}°C | Event: ${signed.event}`);
+    } else {
+      recordRejection(topic || source, result.error, rawIoT);
+    }
+    return result;
+  });
 }
 
 /**
@@ -320,56 +432,153 @@ async function handleIncomingRecord(record, source = 'REST') {
 }
 
 // ==========================================
-// MQTT CLIENT SETUP
+// MQTT CLIENT SETUP (EMQX Cloud / TLS)
 // ==========================================
 if (MQTT_URL) {
-  console.log(`Connecting to MQTT broker: ${MQTT_URL}`);
-  const mqttClient = mqtt.connect(MQTT_URL, {
+  let brokerHost = 'unknown';
+  try {
+    brokerHost = new URL(MQTT_URL).hostname;
+  } catch {
+    brokerHost = MQTT_URL.split('://')[1]?.split(':')[0] || 'unknown';
+  }
+
+  const connectOptions = {
     username: MQTT_USER,
     password: MQTT_PASS,
-    rejectUnauthorized: false,
-    reconnectPeriod: 3000
-  });
+    clientId: 'trustbox-backend-' + Math.random().toString(16).substring(2, 10),
+    clean: true,
+    reconnectPeriod: 3000,
+    connectTimeout: 10000,
+    keepalive: 30,
+    protocolVersion: 4,
+    rejectUnauthorized: true
+  };
+
+  if (MQTT_CA_PATH) {
+    try {
+      connectOptions.ca = fs.readFileSync(MQTT_CA_PATH);
+      console.log(`🔒 Loaded EMQX CA certificate from: ${MQTT_CA_PATH}`);
+    } catch (err) {
+      console.error(`⚠️ Failed reading MQTT_CA_PATH at "${MQTT_CA_PATH}":`, err.message);
+    }
+  }
+
+  console.log(`📡 Connecting to EMQX Cloud / MQTT broker: ${brokerHost} (TLS 8883)...`);
+  mqttClient = mqtt.connect(MQTT_URL, connectOptions);
+
+  // Parse comma-separated raw topics and merge with system topics
+  const rawTopicList = (process.env.IOT_MQTT_TOPIC || 'trustbox/raw/#')
+    .split(',')
+    .map((t) => {
+      let trimmed = t.trim();
+      // Guard against dotenv comment-stripping on unquoted '#'
+      if (trimmed === 'trustbox/raw/' || trimmed === 'trustbox/raw') {
+        trimmed = 'trustbox/raw/#';
+      }
+      return trimmed;
+    })
+    .filter(Boolean);
+
+  const topicsToSubscribe = Array.from(new Set([
+    'trustbox/+/telemetry',
+    'trustbox/+/event',
+    ...rawTopicList
+  ]));
 
   mqttClient.on('connect', () => {
-    console.log('✅ Connected to HiveMQ / MQTT Broker!');
+    mqttConnected = true;
+    mqttStats.last_error = null;
+    console.log(`✅ Connected to EMQX Cloud MQTT broker (${brokerHost}) via TLS!`);
+    io.emit('mqtt_status', { connected: true, last_message_at: mqttStats.last_message_at });
 
-    // --- TrustBox internal signed records (fake-publisher / another TrustBox node) ---
-    mqttClient.subscribe('trustbox/+/telemetry', (err) => {
-      if (!err) console.log('✅ Subscribed to trustbox/+/telemetry  (signed TrustBox records)');
-    });
-    mqttClient.subscribe('trustbox/+/event', (err) => {
-      if (!err) console.log('✅ Subscribed to trustbox/+/event  (signed TrustBox records)');
-    });
+    subscribedTopics.length = 0;
+    topicsToSubscribe.forEach((t) => subscribedTopics.push(t));
 
-    // --- Raw IoT device topic (hardware team payload, no hash/sig) ---
-    mqttClient.subscribe(IOT_MQTT_TOPIC, (err) => {
-      if (!err) console.log(`✅ Subscribed to ${IOT_MQTT_TOPIC}  (raw IoT hardware payloads)`);
+    // Re-subscribe to all topics on every connect/reconnect with QoS 1
+    topicsToSubscribe.forEach((topic) => {
+      mqttClient.subscribe(topic, { qos: 1 }, (err, granted) => {
+        if (err) {
+          console.error(`⚠️ Subscription to "${topic}" failed:`, err.message);
+        } else if (granted && granted.length > 0) {
+          granted.forEach((g) => {
+            if (g.qos >= 128) {
+              console.warn(`⚠️ Subscription denied for "${g.topic}" (QoS code ${g.qos})`);
+            } else {
+              console.log(`✅ Subscribed to ${g.topic} (QoS ${g.qos})`);
+            }
+          });
+        }
+      });
     });
   });
 
-  mqttClient.on('message', async (topic, message) => {
-    try {
-      const payload = JSON.parse(message.toString());
+  mqttClient.on('reconnect', () => {
+    console.log(`🔄 Reconnecting to EMQX Cloud broker (${brokerHost})...`);
+  });
 
-      // Route: raw IoT payload has device_id but no hash/sig/seq
-      const isRawIoT = payload.device_id !== undefined && payload.hash === undefined;
+  mqttClient.on('offline', () => {
+    mqttConnected = false;
+    console.log('📡 MQTT client went offline.');
+    io.emit('mqtt_status', { connected: false, last_message_at: mqttStats.last_message_at });
+  });
 
-      if (isRawIoT) {
-        // Adapt + compute chain server-side, then ingest
-        await ingestIoTRecord(payload, 'IOT-MQTT');
-      } else {
-        // Already a signed TrustBox record — validate and ingest directly
-        await handleIncomingRecord(payload, 'MQTT');
-      }
-    } catch (e) {
-      console.error(`[MQTT ERROR] Failed parsing message on ${topic}:`, e.message);
-    }
+  mqttClient.on('close', () => {
+    mqttConnected = false;
   });
 
   mqttClient.on('error', (err) => {
-    console.error('⚠️ MQTT Broker Error:', err.message);
+    mqttConnected = false;
+    mqttStats.last_error = `${err.message}${err.code ? ` (${err.code})` : ''}`;
+    console.error('⚠️ MQTT Broker Error:', err.message, err.code ? `[Code: ${err.code}]` : '');
+    io.emit('mqtt_status', { connected: false, last_message_at: mqttStats.last_message_at });
   });
+
+  mqttClient.on('message', async (topic, message) => {
+    mqttStats.messages_received++;
+    mqttStats.last_message_at = new Date().toISOString();
+
+    let payload;
+    try {
+      payload = JSON.parse(message.toString());
+    } catch (e) {
+      const preview = message.toString().slice(0, 120);
+      console.error(`[MQTT ERROR] Invalid JSON on ${topic}:`, preview);
+      recordRejection(topic, 'Invalid JSON: ' + e.message, preview);
+      return;
+    }
+
+    // If device_id is missing on a raw topic, derive it from the last segment of the topic
+    if (!payload.device_id && payload.hash === undefined) {
+      const segments = topic.split('/').filter(Boolean);
+      const last = segments[segments.length - 1];
+      if (last && last !== '#' && last !== '+') {
+        payload.device_id = last;
+      }
+    }
+
+    // Route: raw IoT payload has device_id but no hash/sig/seq
+    const isRawIoT = payload.device_id !== undefined && payload.hash === undefined;
+
+    if (isRawIoT) {
+      await ingestIoTRecord(payload, 'IOT-MQTT', topic);
+    } else {
+      const res = await handleIncomingRecord(payload, 'MQTT');
+      if (res.success) {
+        mqttStats.messages_accepted++;
+        mqttStats.last_device_id = payload.box_id || payload.device_id;
+      } else {
+        recordRejection(topic, res.error, payload);
+      }
+    }
+  });
+
+  // Emit mqtt_status every 5 seconds for connected clients
+  setInterval(() => {
+    io.emit('mqtt_status', {
+      connected: mqttConnected,
+      last_message_at: mqttStats.last_message_at
+    });
+  }, 5000);
 } else {
   console.log('ℹ️ MQTT_URL not configured. Running in HTTP/WebSocket mode (Use fake-publisher.js or REST).');
 }
@@ -626,11 +835,45 @@ app.post('/api/iot/ingest', async (req, res) => {
   }
 });
 
-// Health check
+// =========================================================
+// MQTT DIAGNOSTIC & MONITORING ENDPOINTS
+// =========================================================
+
+// GET /api/mqtt/status -> Real-time broker connection & telemetry metrics
+app.get('/api/mqtt/status', (req, res) => {
+  let brokerHost = null;
+  if (MQTT_URL) {
+    try {
+      brokerHost = new URL(MQTT_URL).hostname;
+    } catch {
+      brokerHost = MQTT_URL.split('://')[1]?.split(':')[0] || null;
+    }
+  }
+  res.json({
+    enabled: Boolean(MQTT_URL),
+    connected: mqttConnected,
+    broker_host: brokerHost,
+    subscribed_topics: subscribedTopics,
+    messages_received: mqttStats.messages_received,
+    messages_accepted: mqttStats.messages_accepted,
+    messages_rejected: mqttStats.messages_rejected,
+    last_message_at: mqttStats.last_message_at,
+    last_device_id: mqttStats.last_device_id,
+    last_error: mqttStats.last_error
+  });
+});
+
+// GET /api/mqtt/rejected -> Ring buffer of last 20 rejected or invalid payloads
+app.get('/api/mqtt/rejected', (req, res) => {
+  res.json(rejectedMessages);
+});
+
+// Health check with database & MQTT status
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     mongo: isMongoConnected ? 'connected' : 'in-memory-fallback',
+    mqtt: MQTT_URL ? (mqttConnected ? 'connected' : 'disconnected') : 'disabled',
     time: new Date()
   });
 });

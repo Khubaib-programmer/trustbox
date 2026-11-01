@@ -80,6 +80,15 @@ export default function Dashboard() {
     }
   }, [isDark]);
 
+  // Live freshness tracking (record in last 10 seconds)
+  const [currentTime, setCurrentTime] = useState(Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const isLive = latestRecord && latestRecord.ts ? ((currentTime / 1000) - latestRecord.ts < 10) : false;
+
   // Race condition protection refs
   const activeBoxRef = useRef(boxId);
   const activeRequestIdRef = useRef(0);
@@ -426,12 +435,12 @@ export default function Dashboard() {
           {/* Live indicator */}
           <div className="hidden sm:inline-flex items-center gap-1.5 text-[12px] text-muted tabular">
             <span className="relative flex h-2 w-2">
-              {isConnected && (
+              {isLive && (
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-safe opacity-75" />
               )}
-              <span className={`relative inline-flex rounded-full h-2 w-2 ${isConnected ? 'bg-safe' : 'bg-muted'}`} />
+              <span className={`relative inline-flex rounded-full h-2 w-2 ${isLive ? 'bg-safe' : 'bg-muted'}`} />
             </span>
-            <span>{isConnected ? 'Live' : 'Offline'}</span>
+            <span>{isLive ? 'Live' : 'Waiting for device'}</span>
           </div>
 
           {/* Theme Toggle */}
